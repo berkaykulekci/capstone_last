@@ -18,6 +18,7 @@ class AnalysisSummary(BaseModel):
     csv_url: Optional[str] = None
     side_output_url: Optional[str] = None
     front_output_url: Optional[str] = None
+    pose_model: Optional[str] = "mediapipe"
     created_at: datetime
 
     class Config:
@@ -31,6 +32,7 @@ class AthleteResponse(BaseModel):
     team: Optional[str] = None
     created_at: datetime
     latest_analysis: Optional[AnalysisSummary] = None
+    analyses: list[AnalysisSummary] = []
 
 
 class AnalysisResponse(AnalysisSummary):

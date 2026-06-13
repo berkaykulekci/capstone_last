@@ -560,8 +560,94 @@ input:focus {
   }
 }
 
+/* ── Analysis History Cards ── */
+.analysis-card {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.analysis-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.analysis-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.analysis-score {
+  font-size: 15px;
+}
+
+.analysis-score span {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* ── Pose Model Toggle ── */
+.model-toggle,
+.test-side-select {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.model-toggle-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.model-toggle-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.model-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+
+.model-btn:hover {
+  border-color: var(--cyan);
+  color: var(--text);
+}
+
+.model-btn.active {
+  border-color: var(--cyan);
+  background: #103140;
+  color: var(--cyan);
+}
+
+.model-note {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
 @media (max-width: 900px) {
-  .app-shell,
   .topbar,
   .upload-actions-row {
     display: block;
@@ -592,3 +678,20 @@ input:focus {
     grid-column: 1 / -1;
   }
 }
+
+.delete-analysis-btn {
+  background: transparent;
+  border: none;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.delete-analysis-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+

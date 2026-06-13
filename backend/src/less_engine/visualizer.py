@@ -149,8 +149,11 @@ def create_camera_video(video_path, jumps, results, kamera_tipi, output_name):
     if fps <= 0 or np.isnan(fps):
         fps = 30.0
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')
     out = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
+    if not out.isOpened():
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
     pause_frames = int(fps * PAUSE_DURATION_SEC)
 
     madde_labels = {
