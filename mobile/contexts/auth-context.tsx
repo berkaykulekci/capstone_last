@@ -1,10 +1,24 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+import Constants from 'expo-constants';
 
-export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:8000'; // Android emulator -> localhost
-// For iOS simulator, use 'http://localhost:8000'
-// For physical device, use your machine's local IP
+const getApiUrl = () => {
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+  
+  const hostUri = Constants.expoConfig?.hostUri; // e.g. "192.168.1.105:8081" or "localhost:8081"
+  if (hostUri) {
+    const hostIp = hostUri.split(':')[0];
+    return `http://${hostIp}:8000`;
+  }
+  
+  return 'http://localhost:8000'; // fallback
+};
+
+export const API_URL = getApiUrl();
+console.log('[AuthContext] API_URL configured to:', API_URL);
 
 type AuthContextType = {
   token: string | null;
