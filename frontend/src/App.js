@@ -92,9 +92,13 @@ function CreateAthleteModal({ onClose, onCreate }) {
   const [sport, setSport] = useState('');
   const [team, setTeam] = useState('');
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
-    onCreate({ name, sport, team });
+    try {
+      await onCreate({ name, sport, team });
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
   }
 
   return (
@@ -498,6 +502,7 @@ function App() {
       localStorage.removeItem('sportsmd_token');
       setToken(null);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   function handleAuth(nextToken) {
