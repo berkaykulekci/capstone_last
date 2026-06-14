@@ -11,10 +11,13 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  DeviceEventEmitter,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Directory, File as ExpoFile } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import { File as ExpoFile } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 import { API_URL, useAuth } from '@/contexts/auth-context';
 
@@ -224,6 +227,13 @@ export default function HomeScreen() {
     init();
   }, [loadAthletes]);
 
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('reset-home-screen', () => {
+      setSelectedAthlete(null);
+    });
+    return () => sub.remove();
+  }, []);
+
   async function togglePoseModel(model: PoseModel) {
     let next: PoseModel[];
     if (poseModels.includes(model)) {
@@ -282,6 +292,8 @@ export default function HomeScreen() {
         token={token}
         poseModels={poseModels}
         testSide={testSide}
+        togglePoseModel={togglePoseModel}
+        saveTestSide={saveTestSide}
         onBack={() => setSelectedAthlete(null)}
         onSessionExpired={logout}
         onRefresh={loadAthletes}
@@ -297,24 +309,10 @@ export default function HomeScreen() {
           <Text style={styles.subtitle}>{athletes.length} athletes assigned</Text>
         </View>
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.iconButton} onPress={() => setSettingsVisible(true)}>
-            <Ionicons name="settings-outline" size={22} color={C.text} />
-          </TouchableOpacity>
           <TouchableOpacity style={styles.iconButton} onPress={logout}>
             <Ionicons name="log-out-outline" size={22} color={C.text} />
           </TouchableOpacity>
         </View>
-      </View>
-
-      {/* Active model badge row */}
-      <View style={styles.modelBadgeRow}>
-        {poseModels.map((m) => (
-          <View key={m} style={styles.modelBadge}>
-            <Text style={styles.modelBadgeText}>
-              {modelLabel(m)}{(m === 'yolo' || m === 'rtm') ? ` · ${testSide}` : ''}
-            </Text>
-          </View>
-        ))}
       </View>
 
       <View style={styles.stats}>
@@ -370,72 +368,7 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* Analysis Settings Modal */}
-      <Modal visible={settingsVisible} transparent animationType="fade">
-        <View style={styles.modalBackdrop}>
-          <ScrollView contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
-            <View style={styles.modal}>
-              <Text style={styles.modalTitle}>Analysis Settings</Text>
-              <Text style={styles.settingLabel}>Pose Models</Text>
-              <Text style={styles.settingNote}>Select one or more models to run in a single evaluation.</Text>
 
-              {MODEL_OPTIONS.map(({ id, label, note }) => {
-                const checked = poseModels.includes(id);
-                return (
-                  <TouchableOpacity
-                    key={id}
-                    style={[styles.checkRow, checked && styles.checkRowActive]}
-                    onPress={() => togglePoseModel(id)}
-                    activeOpacity={0.75}
-                  >
-                    <View style={[styles.checkbox, checked && styles.checkboxActive]}>
-                      {checked && <Text style={styles.checkmark}>✓</Text>}
-                    </View>
-                    <View style={styles.checkContent}>
-                      <Text style={[styles.checkLabel, checked && styles.checkLabelActive]}>{label}</Text>
-                      <Text style={styles.checkNote}>{note}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-
-              {poseModels.length > 1 && (
-                <View style={styles.multiModelNote}>
-                  <Text style={styles.multiModelNoteText}>
-                    {poseModels.length} models selected — results will be shown as a comparison.
-                  </Text>
-                </View>
-              )}
-
-              {needsTestSide && (
-                <>
-                  <Text style={[styles.settingLabel, { marginTop: 18 }]}>Test Leg (side camera)</Text>
-                  <View style={styles.toggleRow}>
-                    <TouchableOpacity
-                      style={[styles.toggleBtn, testSide === 'right' && styles.toggleBtnActive]}
-                      onPress={() => saveTestSide('right')}
-                    >
-                      <Text style={[styles.toggleText, testSide === 'right' && styles.toggleTextActive]}>Right</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.toggleBtn, testSide === 'left' && styles.toggleBtnActive]}
-                      onPress={() => saveTestSide('left')}
-                    >
-                      <Text style={[styles.toggleText, testSide === 'left' && styles.toggleTextActive]}>Left</Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-
-              <View style={[styles.modalActions, { marginTop: 20 }]}>
-                <TouchableOpacity style={styles.primaryButton} onPress={() => setSettingsVisible(false)}>
-                  <Text style={styles.primaryText}>Done</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -445,6 +378,8 @@ function AthleteDetail({
   token,
   poseModels,
   testSide,
+  togglePoseModel,
+  saveTestSide,
   onBack,
   onSessionExpired,
   onRefresh,
@@ -453,6 +388,8 @@ function AthleteDetail({
   token: string | null;
   poseModels: PoseModel[];
   testSide: TestSide;
+  togglePoseModel: (model: PoseModel) => Promise<void>;
+  saveTestSide: (side: TestSide) => Promise<void>;
   onBack: () => void;
   onSessionExpired: () => Promise<void>;
   onRefresh: () => Promise<void>;
@@ -548,16 +485,23 @@ function AthleteDetail({
     const fileKey = `${title}-${path}`;
     setDownloadingOutput(fileKey);
     try {
-      const directory = await Directory.pickDirectoryAsync();
       const filename = outputFileName(path, fallbackName);
-      await ExpoFile.downloadFileAsync(apiUrl(path), directory, {
-        idempotent: true,
+      const localUri = `${FileSystem.documentDirectory}${filename}`;
+      
+      const { uri } = await FileSystem.downloadAsync(apiUrl(path), localUri, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
-      Alert.alert('Download complete', `${title} saved as ${filename}.`);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri);
+      } else {
+        Alert.alert('Download complete', `${title} saved locally.`);
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '';
-      if (!message.toLowerCase().includes('cancel')) Alert.alert('Download failed', message || 'Output could not be downloaded');
+      if (!message.toLowerCase().includes('cancel')) {
+        Alert.alert('Download failed', message || 'Output could not be downloaded');
+      }
     } finally {
       setDownloadingOutput(null);
     }
@@ -597,28 +541,64 @@ function AthleteDetail({
 
       <View style={styles.uploadPanel}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Upload Video</Text>
-          <View style={styles.activeBadgesRow}>
-            {poseModels.map((m) => (
-              <View key={m} style={styles.modelBadge}>
-                <Text style={styles.modelBadgeText}>{modelLabel(m)}</Text>
-              </View>
-            ))}
-          </View>
+          <Text style={styles.sectionTitle}>Diagnostic Upload</Text>
         </View>
 
         <UploadButton label="Side view (sagittal)" fileName={sideFile?.name} onPress={() => pickVideo('side')} />
         <UploadButton label="Front view (frontal)" fileName={frontFile?.name} onPress={() => pickVideo('front')} />
 
+        <Text style={styles.sectionTitleSecondary}>Engine Configuration</Text>
+        <Text style={styles.settingNoteInline}>Select one or more models to run in a single evaluation.</Text>
+
+        {MODEL_OPTIONS.map(({ id, label, note }) => {
+          const checked = poseModels.includes(id);
+          return (
+            <TouchableOpacity
+              key={id}
+              style={[styles.checkRow, checked && styles.checkRowActive]}
+              onPress={() => togglePoseModel(id)}
+              activeOpacity={0.75}
+            >
+              <View style={[styles.checkbox, checked && styles.checkboxActive]}>
+                {checked && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <View style={styles.checkContent}>
+                <Text style={[styles.checkLabel, checked && styles.checkLabelActive]}>{label}</Text>
+                <Text style={styles.checkNote}>{note}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+
         {poseModels.length > 1 && (
-          <View style={styles.multiRunNote}>
-            <Text style={styles.multiRunNoteText}>
-              Will run {poseModels.length} models — {poseModels.map(modelLabel).join(', ')}
+          <View style={styles.multiModelNote}>
+            <Text style={styles.multiModelNoteText}>
+              {poseModels.length} models selected — results will be shown as a comparison.
             </Text>
           </View>
         )}
 
-        <TouchableOpacity style={[styles.analyseButton, busy && styles.disabledButton]} onPress={analyse} disabled={busy}>
+        {poseModels.some((m) => m === 'yolo' || m === 'rtm') && (
+          <>
+            <Text style={[styles.settingLabelInline]}>Test Leg (side camera)</Text>
+            <View style={styles.toggleRow}>
+              <TouchableOpacity
+                style={[styles.toggleBtn, testSide === 'right' && styles.toggleBtnActive]}
+                onPress={() => saveTestSide('right')}
+              >
+                <Text style={[styles.toggleText, testSide === 'right' && styles.toggleTextActive]}>Right</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toggleBtn, testSide === 'left' && styles.toggleBtnActive]}
+                onPress={() => saveTestSide('left')}
+              >
+                <Text style={[styles.toggleText, testSide === 'left' && styles.toggleTextActive]}>Left</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        <TouchableOpacity style={[styles.analyseButton, busy && styles.disabledButton, { marginTop: 10 }]} onPress={analyse} disabled={busy}>
           {busy ? <ActivityIndicator color="#fff" /> : <Ionicons name="cloud-upload-outline" size={20} color="#fff" />}
           <Text style={styles.primaryText}>{busy ? 'Analysing...' : 'Upload & Analyse'}</Text>
         </TouchableOpacity>
@@ -813,6 +793,9 @@ const styles = StyleSheet.create({
   uploadPanel: { borderRadius: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, padding: 16, gap: 12 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
   sectionTitle: { color: C.text, fontSize: 18, fontWeight: '800' },
+  sectionTitleSecondary: { color: C.text, fontSize: 18, fontWeight: '800', marginTop: 18, marginBottom: 4 },
+  settingNoteInline: { color: C.muted, fontSize: 12, lineHeight: 17, marginBottom: 10 },
+  settingLabelInline: { color: C.muted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 14, marginBottom: 8 },
   uploadBox: { minHeight: 76, borderRadius: 8, borderWidth: 1, borderStyle: 'dashed', borderColor: '#394250', backgroundColor: '#0f141b', paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
   uploadCopy: { flex: 1 },
   uploadLabel: { color: C.text, fontWeight: '800' },

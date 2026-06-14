@@ -13,10 +13,11 @@ import {
 } from 'react-native';
 import { Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import LottieView from 'lottie-react-native';
 import { useAuth } from '@/contexts/auth-context';
 
 const C = {
-  bg: '#0D1117',
+  bg: '#0D2137',
   surface: '#161B22',
   border: '#30363D',
   borderFocused: '#1AA8CE',
@@ -63,11 +64,14 @@ export default function LoginScreen() {
         <View style={styles.orbOuter} />
         <View style={styles.orbInner} />
 
-        {/* Lock icon badge */}
+        {/* Lottie running animation badge */}
         <View style={styles.brandArea}>
-          <View style={styles.iconBadge}>
-            <Ionicons name="lock-closed" size={30} color={C.primary} />
-          </View>
+          <LottieView
+            source={require('../assets/running-animation.lottie')}
+            autoPlay
+            loop
+            style={styles.lottieLogo}
+          />
         </View>
 
         <Text style={styles.title}>Welcome Back</Text>
@@ -214,15 +218,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 28,
   },
-  iconBadge: {
-    width: 72,
-    height: 72,
-    borderRadius: 22,
-    backgroundColor: 'rgba(10, 126, 164, 0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(10, 126, 164, 0.32)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  lottieLogo: {
+    width: 130,
+    height: 130,
   },
   // Heading
   title: {

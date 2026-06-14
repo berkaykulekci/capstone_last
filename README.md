@@ -2,7 +2,7 @@
 
 Kutunun üzerinden atlayan sporcuların iniş mekaniklerini **17 maddelik LESS** çerçevesiyle otomatik değerlendiren kural tabanlı biyomekanik analiz sistemi.
 
-Bu klasör artık aynı zamanda SportsMD full-stack uygulamasını da içerir:
+Bu klasör artık aynı zamanda Kinetic full-stack uygulamasını da içerir:
 
 - `backend/` - FastAPI API, kullanıcı girişi, athlete kayıtları, video upload ve LESS analiz servisi
 - `frontend/` - React dashboard, athlete oluşturma, yan/ön video yükleme ve çıktı linkleri

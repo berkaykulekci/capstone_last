@@ -90,6 +90,115 @@ def create_athlete(
     return athlete_response(athlete)
 
 
+@router.get("/statistics")
+def get_statistics(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return aggregated statistics for all athletes owned by the current user."""
+    from collections import defaultdict
+
+    athletes = (
+        db.query(Athlete)
+        .filter(Athlete.user_id == current_user.id)
+        .order_by(Athlete.created_at.asc())
+        .all()
+    )
+
+    total_athletes = len(athletes)
+    total_analyses = 0
+    risk_counts = {"High": 0, "Moderate": 0, "Low": 0, "No data": 0}
+    model_counts = defaultdict(int)
+    sport_stats = defaultdict(lambda: {"count": 0, "scores": [], "high": 0, "moderate": 0, "low": 0})
+    score_timeline = []
+    athlete_summaries = []
+
+    for athlete in athletes:
+        analyses = sorted(athlete.analyses, key=lambda a: a.created_at)
+        scores = [a.total_score for a in analyses if a.total_score is not None]
+
+        total_analyses += len(analyses)
+
+        for analysis in analyses:
+            r = analysis.risk or "No data"
+            if r in risk_counts:
+                risk_counts[r] += 1
+            else:
+                risk_counts["No data"] += 1
+
+            model_counts[analysis.pose_model or "mediapipe"] += 1
+
+            if analysis.total_score is not None:
+                score_timeline.append({
+                    "date": analysis.created_at.strftime("%Y-%m-%d"),
+                    "score": analysis.total_score,
+                    "athlete": athlete.name,
+                    "model": analysis.pose_model or "mediapipe",
+                })
+
+            sport_key = athlete.sport or "Unknown"
+            sport_stats[sport_key]["count"] += 1
+            if analysis.total_score is not None:
+                sport_stats[sport_key]["scores"].append(analysis.total_score)
+            r_lower = (analysis.risk or "").lower()
+            if r_lower == "high":
+                sport_stats[sport_key]["high"] += 1
+            elif r_lower == "moderate":
+                sport_stats[sport_key]["moderate"] += 1
+            elif r_lower == "low":
+                sport_stats[sport_key]["low"] += 1
+
+        latest = analyses[-1] if analyses else None
+        avg_score = round(sum(scores) / len(scores), 1) if scores else None
+        athlete_summaries.append({
+            "id": athlete.id,
+            "name": athlete.name,
+            "sport": athlete.sport,
+            "team": athlete.team,
+            "total_analyses": len(analyses),
+            "avg_score": avg_score,
+            "latest_score": latest.total_score if latest else None,
+            "latest_risk": latest.risk if latest else None,
+            "latest_model": latest.pose_model if latest else None,
+        })
+
+    score_distribution = {"0-4": 0, "5-9": 0, "10-14": 0, "15-19": 0}
+    for entry in score_timeline:
+        s = entry["score"]
+        if s <= 4:
+            score_distribution["0-4"] += 1
+        elif s <= 9:
+            score_distribution["5-9"] += 1
+        elif s <= 14:
+            score_distribution["10-14"] += 1
+        else:
+            score_distribution["15-19"] += 1
+
+    sport_summary = []
+    for sport, data in sport_stats.items():
+        avg = round(sum(data["scores"]) / len(data["scores"]), 1) if data["scores"] else None
+        sport_summary.append({
+            "sport": sport,
+            "analyses": data["count"],
+            "avg_score": avg,
+            "high": data["high"],
+            "moderate": data["moderate"],
+            "low": data["low"],
+        })
+    sport_summary.sort(key=lambda x: x["analyses"], reverse=True)
+
+    return {
+        "total_athletes": total_athletes,
+        "total_analyses": total_analyses,
+        "risk_distribution": risk_counts,
+        "score_distribution": score_distribution,
+        "model_usage": dict(model_counts),
+        "sport_summary": sport_summary,
+        "score_timeline": sorted(score_timeline, key=lambda x: x["date"]),
+        "athlete_summaries": athlete_summaries,
+    }
+
+
 @router.get("/{athlete_id}", response_model=AthleteResponse)
 def get_athlete(
     athlete_id: str,

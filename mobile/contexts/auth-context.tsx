@@ -7,13 +7,13 @@ const getApiUrl = () => {
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
-  
+
   const hostUri = Constants.expoConfig?.hostUri; // e.g. "192.168.1.105:8081" or "localhost:8081"
   if (hostUri) {
     const hostIp = hostUri.split(':')[0];
-    return `http://${hostIp}:8000`;
+    return `http://localhost:8000`;
   }
-  
+
   return 'http://localhost:8000'; // fallback
 };
 
