@@ -1,14 +1,17 @@
 # Pose Estimation Benchmark
 
-Ground-truth etiketli veri seti gerektirmeyen metriklerle **MediaPipe BlazePose**, **YOLOv8-pose** ve **kendi pipeline'ımızı** karşılaştırır.
+Ground-truth etiketli veri seti gerektirmeyen metriklerle **MediaPipe BlazePose**, **YOLOv8-pose**, **RTMPose-WholeBody** ve **kendi pipeline'ımızı** karşılaştırır.
 
 ## Kurulum
 
-Benchmark için ek paket gerekmez; mevcut `requirements.txt` yeterlidir.
-YOLO testleri için `ultralytics` paketi gerekir:
+Benchmark için ek paketler gerekir:
 
 ```bash
+# YOLO testleri için
 pip install ultralytics
+
+# RTMPose testleri için
+pip install rtmlib>=0.0.13 onnxruntime>=1.17
 ```
 
 ## Kullanım
@@ -26,7 +29,10 @@ python benchmark/benchmark.py --videos videos/ --output benchmark/results/
 python benchmark/benchmark.py --yolo-model yolov8n-pose.pt
 
 # Sadece MediaPipe
-python benchmark/benchmark.py --skip-yolo --skip-ourmodel
+python benchmark/benchmark.py --skip-yolo --skip-rtm --skip-ourmodel
+
+# RTMPose hariç diğer modeller
+python benchmark/benchmark.py --skip-rtm
 ```
 
 ### Argümanlar
@@ -37,6 +43,7 @@ python benchmark/benchmark.py --skip-yolo --skip-ourmodel
 | `--output` | `benchmark/results/` | CSV çıktı klasörü |
 | `--yolo-model` | `yolov8x-pose.pt` | YOLO model dosyası |
 | `--skip-yolo` | — | YOLO modelini atla |
+| `--skip-rtm` | — | RTMPose modelini atla |
 | `--skip-ourmodel` | — | OurModel pipeline'ını atla |
 
 ## Video Formatı
@@ -66,7 +73,7 @@ benchmark/results/
 | Sütun | Açıklama |
 |-------|----------|
 | `video` | Video dosya adı |
-| `model` | `MediaPipe` / `YOLO` / `OurModel` |
+| `model` | `MediaPipe` / `YOLO` / `RTMPose` / `OurModel` |
 | `total_frames` | İşlenen frame sayısı |
 | `fps` | `total_frames / toplam_inference_süresi` |
 | `latency_ms` | `mean(frame_inference_ms)` — ortalama gecikme |
@@ -106,6 +113,12 @@ benchmark/results/
 - Model ilk çalışmada indirilir (~160 MB)
 - **Not:** `backend/yolov8x-pose.pt` mevcutsa otomatik kullanılabilir
 
+### RTMPose-WholeBody
+- 17 keypoint (COCO formatı, `rtmlib` via ONNX Runtime)
+- Heel + toe landmarks (M4/M9/M10 exact hesaplaması)
+- Mode: `performance` (varsayılan); env var `RTM_MODE` ile override edilebilir
+- Ağırlıklar `~/.cache/rtmlib/` adresinde otomatik indirilir
+
 ### OurModel
 - MediaPipe inference + `jump_detector.detect_jumps()` post-processing
 - Jump detector süresi her frame'e orantılı olarak eklenir
@@ -113,18 +126,31 @@ benchmark/results/
 
 ## Limb & Açı Hesaplama Detayları
 
-**Ortak keypoint seti** (her iki model için):
+**Ortak keypoint seti** (YOLO & RTMPose — COCO-17 formatı):
 
-| Bölge | MediaPipe indeks | YOLO (COCO) indeks |
-|-------|-----------------|-------------------|
-| Sol omuz | 11 | 5 |
-| Sağ omuz | 12 | 6 |
-| Sol kalça | 23 | 11 |
-| Sağ kalça | 24 | 12 |
-| Sol diz | 25 | 13 |
-| Sağ diz | 26 | 14 |
-| Sol bilek | 27 | 15 |
-| Sağ bilek | 28 | 16 |
+| Bölge | YOLO indeks | RTMPose indeks |
+|-------|-----------|----------------|
+| Sol omuz | 5 | 5 |
+| Sağ omuz | 6 | 6 |
+| Sol kalça | 11 | 11 |
+| Sağ kalça | 12 | 12 |
+| Sol diz | 13 | 13 |
+| Sağ diz | 14 | 14 |
+| Sol bilek | 15 | 15 |
+| Sağ bilek | 16 | 16 |
+
+**MediaPipe indeksleri:**
+
+| Bölge | Indeks |
+|-------|--------|
+| Sol omuz | 11 |
+| Sağ omuz | 12 |
+| Sol kalça | 23 |
+| Sağ kalça | 24 |
+| Sol diz | 25 |
+| Sağ diz | 26 |
+| Sol bilek | 27 |
+| Sağ bilek | 28 |
 
 **Femur/Tibia oranı anthropometrik normu:** 0.9 ± 0.15 → [0.75, 1.05]  
 **Biyomekanik açı sınırları:** Diz [0°, 170°], Kalça [−20°, 140°]

@@ -207,28 +207,44 @@ function UploadBox({ label, file, onChange }) {
   );
 }
 
-function ModelToggle({ value, onChange }) {
+const MODEL_OPTIONS = [
+  { id: 'mediapipe', label: 'MediaPipe', note: 'Auto-detects test side via Z-coord. All 17 items exact. Max score: 19.' },
+  { id: 'yolo', label: 'YOLO Pose', note: 'No heel/toe landmarks → M4, M9, M10 approximated. Max score: 19, approximate items flagged in CSV.' },
+  { id: 'rtm', label: 'RTMPose', note: 'Heel + toe landmarks present → all 17 items exact (M4/M9/M10 included). Max score: 19.' },
+];
+
+function ModelCheckboxes({ selected, onChange }) {
+  function toggle(id) {
+    if (selected.includes(id)) {
+      if (selected.length === 1) return; // keep at least one
+      onChange(selected.filter((m) => m !== id));
+    } else {
+      onChange([...selected, id]);
+    }
+  }
+
   return (
-    <div className="model-toggle">
-      <span className="model-toggle-label">Pose Model</span>
-      <div className="model-toggle-buttons">
-        <button
-          type="button"
-          className={value === 'mediapipe' ? 'model-btn active' : 'model-btn'}
-          onClick={() => onChange('mediapipe')}
-        >
-          MediaPipe
-        </button>
-        <button
-          type="button"
-          className={value === 'yolo' ? 'model-btn active' : 'model-btn'}
-          onClick={() => onChange('yolo')}
-        >
-          YOLO
-        </button>
+    <div className="model-checkboxes">
+      <span className="model-toggle-label">Pose Model{selected.length > 1 ? 's' : ''}</span>
+      <div className="model-checkbox-list">
+        {MODEL_OPTIONS.map(({ id, label, note }) => {
+          const checked = selected.includes(id);
+          return (
+            <label key={id} className={`model-checkbox-item${checked ? ' checked' : ''}`}>
+              <span className={`model-checkbox-box${checked ? ' checked' : ''}`}>
+                {checked && <span className="model-checkbox-tick">✓</span>}
+              </span>
+              <span className="model-checkbox-content">
+                <strong>{label}</strong>
+                <span className="model-note">{note}</span>
+              </span>
+              <input type="checkbox" checked={checked} onChange={() => toggle(id)} />
+            </label>
+          );
+        })}
       </div>
-      {value === 'yolo' && (
-        <p className="model-note">M4 (plantar fleksiyon), M9 (iç rot), M10 (dış rot) maddeleri toe/heel landmark olmadığından proxy yöntemle yaklaşık hesaplanır. Max skor: 19, yaklaşık maddeler CSV'de işaretlenir.</p>
+      {selected.length > 1 && (
+        <p className="model-multi-note">Running {selected.length} models — results will be shown side-by-side for comparison.</p>
       )}
     </div>
   );
@@ -237,7 +253,7 @@ function ModelToggle({ value, onChange }) {
 function TestSideSelect({ value, onChange }) {
   return (
     <div className="test-side-select">
-      <span className="model-toggle-label">Test Leg (YOLO)</span>
+      <span className="model-toggle-label">Test Leg</span>
       <div className="model-toggle-buttons">
         <button
           type="button"
@@ -254,21 +270,43 @@ function TestSideSelect({ value, onChange }) {
           Left
         </button>
       </div>
-      <p className="model-note">Which leg faces the side camera?</p>
+      <p className="model-note">Which leg faces the side camera? (required for YOLO / RTMPose)</p>
     </div>
   );
 }
 
+// Groups analyses submitted in the same minute into comparison batches.
+// Analyses arrive sorted newest-first; we reverse, group, then re-reverse.
+function groupAnalyses(analyses) {
+  if (!analyses.length) return [];
+  const asc = [...analyses].reverse();
+  const groups = [];
+  let current = [asc[0]];
+  const minuteKey = (a) => a.created_at ? a.created_at.slice(0, 16) : '';
+  for (let i = 1; i < asc.length; i++) {
+    if (minuteKey(asc[i]) === minuteKey(current[0])) {
+      current.push(asc[i]);
+    } else {
+      groups.push(current);
+      current = [asc[i]];
+    }
+  }
+  groups.push(current);
+  return groups.reverse();
+}
+
 function ModelBadge({ model }) {
-  const isYolo = (model || '').toLowerCase() === 'yolo';
+  const m = (model || '').toLowerCase();
+  const label = m === 'yolo' ? 'YOLO' : m === 'rtm' ? 'RTMPose' : 'MediaPipe';
+  const colored = m === 'yolo' || m === 'rtm';
   return (
-    <span className={`pill ${isYolo ? 'blue' : ''}`} style={{ fontSize: 11 }}>
-      {isYolo ? 'YOLO' : 'MediaPipe'}
+    <span className={`pill ${colored ? 'blue' : ''}`} style={{ fontSize: 11 }}>
+      {label}
     </span>
   );
 }
 
-function AnalysisCard({ analysis, athleteName, onError, onDelete }) {
+function AnalysisCard({ analysis, athleteName, onError, onDelete, compact }) {
   const date = new Date(analysis.created_at).toLocaleString('tr-TR', {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
@@ -293,7 +331,7 @@ function AnalysisCard({ analysis, athleteName, onError, onDelete }) {
   }
 
   return (
-    <div className="analysis-card">
+    <div className={`analysis-card${compact ? ' compact' : ''}`}>
       <div className="analysis-card-header">
         <div className="analysis-card-meta">
           <ModelBadge model={analysis.pose_model} />
@@ -303,7 +341,7 @@ function AnalysisCard({ analysis, athleteName, onError, onDelete }) {
           </strong>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <small>{date}</small>
+          {!compact && <small>{date}</small>}
           {onDelete && (
             <button
               type="button"
@@ -339,10 +377,12 @@ function AnalysisCard({ analysis, athleteName, onError, onDelete }) {
 function AthleteDetail({ athlete, onBack, onAnalysed }) {
   const [sideFile, setSideFile] = useState(null);
   const [frontFile, setFrontFile] = useState(null);
-  const [poseModel, setPoseModel] = useState('mediapipe');
+  const [poseModels, setPoseModels] = useState(['mediapipe']);
   const [testSide, setTestSide] = useState('right');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  const needsTestSide = poseModels.some((m) => m === 'yolo' || m === 'rtm');
 
   async function analyse() {
     if (!sideFile || !frontFile) {
@@ -354,7 +394,7 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
     const form = new FormData();
     form.append('side_video', sideFile);
     form.append('front_video', frontFile);
-    form.append('pose_model', poseModel);
+    form.append('pose_models', poseModels.join(','));
     form.append('test_side', testSide);
 
     try {
@@ -429,8 +469,8 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
               <UploadBox label="Side view (sagittal)" file={sideFile} onChange={setSideFile} />
               <UploadBox label="Front view (frontal)" file={frontFile} onChange={setFrontFile} />
             </div>
-            <ModelToggle value={poseModel} onChange={setPoseModel} />
-            {poseModel === 'yolo' && <TestSideSelect value={testSide} onChange={setTestSide} />}
+            <ModelCheckboxes selected={poseModels} onChange={setPoseModels} />
+            {needsTestSide && <TestSideSelect value={testSide} onChange={setTestSide} />}
             <div className="upload-actions-row">
               <button className="primary-button" onClick={analyse} disabled={busy}>
                 {busy ? 'Analysing...' : 'Upload & Analyse'}
@@ -451,15 +491,33 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
             {!busy && analyses.length === 0 && (
               <div className="empty-state">No analyses yet.</div>
             )}
-            {!busy && analyses.map((a) => (
-              <AnalysisCard
-                key={a.id}
-                analysis={a}
-                athleteName={athlete.name}
-                onError={setError}
-                onDelete={deleteAnalysis}
-              />
-            ))}
+            {!busy && groupAnalyses(analyses).map((group, i) =>
+              group.length === 1 ? (
+                <AnalysisCard
+                  key={group[0].id}
+                  analysis={group[0]}
+                  athleteName={athlete.name}
+                  onError={setError}
+                  onDelete={deleteAnalysis}
+                />
+              ) : (
+                <div key={i} className="analysis-comparison-group">
+                  <div className="comparison-group-label">Comparison run · {new Date(group[0].created_at).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</div>
+                  <div className="comparison-group-grid">
+                    {group.map((a) => (
+                      <AnalysisCard
+                        key={a.id}
+                        analysis={a}
+                        athleteName={athlete.name}
+                        onError={setError}
+                        onDelete={deleteAnalysis}
+                        compact
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
+            )}
           </div>
         </section>
       </div>

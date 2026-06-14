@@ -26,6 +26,21 @@ from ..less_engine.yolo_less_rules import (
 )
 from ..less_engine.yolo_visualizer import create_yolo_camera_video
 
+from ..less_engine.rtm_config import (
+    NORMALIZE_VIDEO_FRAME_COORDS as RTM_NORMALIZE,
+    NORMALIZED_FRAME_WIDTH as RTM_FRAME_WIDTH,
+)
+from ..less_engine.rtm_pose_extractor import extract_poses as rtm_extract_poses
+from ..less_engine.rtm_jump_detector import detect_jumps as rtm_detect_jumps
+from ..less_engine.rtm_less_rules import (
+    evaluate_yan_kamera as rtm_evaluate_yan,
+    evaluate_on_kamera as rtm_evaluate_on,
+    combine_results as rtm_combine_results,
+    compute_total_score as rtm_compute_total_score,
+    RTM_NA_MADDE,
+)
+from ..less_engine.rtm_visualizer import create_rtm_camera_video
+
 
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "media")).resolve()
 
@@ -157,7 +172,7 @@ def run_yolo_less_analysis(
     }
 
 
-def _write_yolo_csv(path: str, combined, skorlar, toplam, test_side, yaklasik_maddeler=None):
+def _write_yolo_csv(path: str, combined, skorlar, toplam, test_side, yaklasik_maddeler=None, model='yolo'):
     import pandas as pd
     from ..less_engine.report_generator import MADDE_ISIMLERI, MADDE_SIRASI
     if yaklasik_maddeler is None:
@@ -169,7 +184,7 @@ def _write_yolo_csv(path: str, combined, skorlar, toplam, test_side, yaklasik_ma
         m_no = int(mk[1:])
         puanlar = []
         row = {
-            'model': 'yolo',
+            'model': model,
             'test_tarafi': test_side,
             'madde_no': m_no,
             'madde_adi': m_name,
@@ -194,7 +209,7 @@ def _write_yolo_csv(path: str, combined, skorlar, toplam, test_side, yaklasik_ma
         rows.append(row)
 
     rows.append({
-        'model': 'yolo', 'test_tarafi': test_side,
+        'model': model, 'test_tarafi': test_side,
         'madde_no': '', 'madde_adi': 'TOPLAM LESS PUANI', 'kamera': '', 'yaklaşık': False,
         'atlayis_1_deger': '', 'atlayis_1_puan': '',
         'atlayis_2_deger': '', 'atlayis_2_puan': '',
@@ -202,3 +217,64 @@ def _write_yolo_csv(path: str, combined, skorlar, toplam, test_side, yaklasik_ma
         'karar_puani': toplam,
     })
     pd.DataFrame(rows).to_csv(path, index=False, encoding='utf-8-sig')
+
+
+def run_rtm_less_analysis(
+    side_video_path: str,
+    front_video_path: str,
+    output_dir: Path,
+    test_side: str = "right",
+) -> dict:
+    """
+    RTMPose-WholeBody (ONNX) tabanlı LESS analizi.
+
+    YOLO sürümünden farkları:
+      - heel + toe keypoint'leri MEVCUT → M4, M9, M10 PROXY OLMADAN exact hesaplanır
+      - yaklaşık (yaklasik) madde YOKTUR; tüm 17 madde tam, max skor 19
+      - test_side otomatik belirlenemiyor (Z yok) → parametre olarak alınır
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    yan_poses, yan_w, yan_h, yan_fps, _ = rtm_extract_poses(side_video_path)
+    on_poses,  on_w,  on_h,  on_fps,  _ = rtm_extract_poses(front_video_path)
+
+    jumps_yan = rtm_detect_jumps(yan_poses, test_side, label="YAN")
+    jumps_on  = rtm_detect_jumps(on_poses,  test_side, label="ON")
+
+    if not jumps_yan:
+        raise RuntimeError("[RTMPose] Yan kamera videosunda iniş tespit edilemedi.")
+    if not jumps_on:
+        raise RuntimeError("[RTMPose] Ön kamera videosunda iniş tespit edilemedi.")
+
+    on_analysis_width = RTM_FRAME_WIDTH if RTM_NORMALIZE else on_w
+
+    yan_results = rtm_evaluate_yan(yan_poses, jumps_yan, test_side)
+    on_results  = rtm_evaluate_on(on_poses, jumps_on, test_side, on_analysis_width)
+    combined    = rtm_combine_results(yan_results, on_results)
+
+    total_score, skorlar, yaklasik_maddeler = rtm_compute_total_score(combined)
+
+    csv_path         = output_dir / "rtm_less_sonuclar.csv"
+    side_output_path = output_dir / "gorsel_analiz_yan.mp4"
+    front_output_path = output_dir / "gorsel_analiz_on.mp4"
+
+    _write_yolo_csv(str(csv_path), combined, skorlar, total_score, test_side,
+                    yaklasik_maddeler, model="rtm")
+
+    create_rtm_camera_video(
+        side_video_path, yan_poses, jumps_yan, yan_results, "yan", str(side_output_path))
+    create_rtm_camera_video(
+        front_video_path, on_poses, jumps_on, on_results, "on", str(front_output_path))
+
+    return {
+        "total_score": total_score,
+        "risk": score_to_risk(total_score),
+        "csv_path": str(csv_path),
+        "side_output_path": str(side_output_path),
+        "front_output_path": str(front_output_path),
+        "jumps_yan": jumps_yan,
+        "jumps_on": jumps_on,
+        "rtm_na_madde": sorted(RTM_NA_MADDE),
+        "rtm_yaklasik_madde": yaklasik_maddeler,
+        "pose_model": "rtm",
+    }

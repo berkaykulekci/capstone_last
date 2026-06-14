@@ -7,7 +7,16 @@ from sqlalchemy.orm import Session
 from ..auth.dependencies import get_current_user
 from ..auth.model import User
 from ..database import get_db
-from .analysis_service import MEDIA_ROOT, media_url, run_less_analysis, run_yolo_less_analysis, save_upload
+from .analysis_service import (
+    MEDIA_ROOT,
+    media_url,
+    run_less_analysis,
+    run_rtm_less_analysis,
+    run_yolo_less_analysis,
+    save_upload,
+)
+
+VALID_POSE_MODELS = {"mediapipe", "yolo", "rtm"}
 from .model import Analysis, Athlete, new_public_id
 from .schema import AnalysisResponse, AnalysisSummary, AthleteCreate, AthleteResponse
 
@@ -90,74 +99,105 @@ def get_athlete(
     return athlete_response(get_owned_athlete(athlete_id, current_user, db))
 
 
-@router.post("/{athlete_id}/analyse", response_model=AnalysisResponse)
+@router.post("/{athlete_id}/analyse", response_model=list[AnalysisResponse])
 async def analyse_athlete(
     athlete_id: str,
     side_video: UploadFile = File(...),
     front_video: UploadFile = File(...),
-    pose_model: str = Form("mediapipe"),
+    pose_models: str = Form("mediapipe"),
+    pose_model: str = Form(""),
     test_side: str = Form("right"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     athlete = get_owned_athlete(athlete_id, current_user, db)
-    analysis_id = new_public_id("ANL")
-    analysis_dir = MEDIA_ROOT / "athletes" / athlete.id / analysis_id
-    input_dir = analysis_dir / "inputs"
-    output_dir = analysis_dir / "outputs"
-
-    side_suffix = Path(side_video.filename or "").suffix or ".mp4"
-    front_suffix = Path(front_video.filename or "").suffix or ".mp4"
-    side_path = await save_upload(side_video, input_dir / f"yan_kamera{side_suffix}")
-    front_path = await save_upload(front_video, input_dir / f"on_kamera{front_suffix}")
-
-    use_yolo = pose_model.lower() == "yolo"
     normalised_test_side = test_side.lower() if test_side.lower() in ("left", "right") else "right"
 
-    analysis = Analysis(
-        id=analysis_id,
-        athlete_id=athlete.id,
-        user_id=current_user.id,
-        status="processing",
-        side_video_path=side_path,
-        front_video_path=front_path,
-        pose_model="yolo" if use_yolo else "mediapipe",
-    )
-    db.add(analysis)
-    db.commit()
+    # Resolve which models to run. `pose_models` is the new multi-value field
+    # (comma-separated); `pose_model` is the legacy single-value fallback.
+    raw_models = pose_models or pose_model or "mediapipe"
+    selected_models = [
+        m for m in (m.strip().lower() for m in raw_models.split(","))
+        if m in VALID_POSE_MODELS
+    ] or ["mediapipe"]
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    selected_models = [m for m in selected_models if not (m in seen or seen.add(m))]  # type: ignore[func-returns-value]
 
-    try:
-        if use_yolo:
-            result = run_yolo_less_analysis(side_path, front_path, output_dir,
-                                            test_side=normalised_test_side)
-        else:
-            result = run_less_analysis(side_path, front_path, output_dir)
-    except Exception as exc:
-        analysis.status = "failed"
+    # Save uploads once, shared across all model runs
+    shared_dir = MEDIA_ROOT / "athletes" / athlete.id / "shared_inputs"
+    side_suffix = Path(side_video.filename or "").suffix or ".mp4"
+    front_suffix = Path(front_video.filename or "").suffix or ".mp4"
+    side_path = await save_upload(side_video, shared_dir / f"yan_kamera{side_suffix}")
+    front_path = await save_upload(front_video, shared_dir / f"on_kamera{front_suffix}")
+
+    responses: list[AnalysisResponse] = []
+
+    for model in selected_models:
+        analysis_id = new_public_id("ANL")
+        output_dir = MEDIA_ROOT / "athletes" / athlete.id / analysis_id / "outputs"
+
+        analysis = Analysis(
+            id=analysis_id,
+            athlete_id=athlete.id,
+            user_id=current_user.id,
+            status="processing",
+            side_video_path=side_path,
+            front_video_path=front_path,
+            pose_model=model,
+        )
+        db.add(analysis)
         db.commit()
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    analysis.status = "reviewed"
-    analysis.risk = result["risk"]
-    analysis.total_score = result["total_score"]
-    analysis.csv_path = result["csv_path"]
-    analysis.side_output_path = result.get("side_output_path")
-    analysis.front_output_path = result.get("front_output_path")
-    db.commit()
-    db.refresh(analysis)
+        try:
+            if model == "yolo":
+                result = run_yolo_less_analysis(side_path, front_path, output_dir,
+                                                test_side=normalised_test_side)
+            elif model == "rtm":
+                result = run_rtm_less_analysis(side_path, front_path, output_dir,
+                                               test_side=normalised_test_side)
+            else:
+                result = run_less_analysis(side_path, front_path, output_dir)
+        except Exception as exc:
+            analysis.status = "failed"
+            db.commit()
+            responses.append(AnalysisResponse(
+                id=analysis.id,
+                athlete_id=analysis.athlete_id,
+                status="failed",
+                risk=None,
+                total_score=None,
+                csv_url=None,
+                side_output_url=None,
+                front_output_url=None,
+                pose_model=model,
+                created_at=analysis.created_at,
+            ))
+            continue
 
-    return AnalysisResponse(
-        id=analysis.id,
-        athlete_id=analysis.athlete_id,
-        status=analysis.status,
-        risk=analysis.risk,
-        total_score=analysis.total_score,
-        csv_url=media_url(analysis.csv_path),
-        side_output_url=media_url(analysis.side_output_path),
-        front_output_url=media_url(analysis.front_output_path),
-        pose_model=analysis.pose_model,
-        created_at=analysis.created_at,
-    )
+        analysis.status = "reviewed"
+        analysis.risk = result["risk"]
+        analysis.total_score = result["total_score"]
+        analysis.csv_path = result["csv_path"]
+        analysis.side_output_path = result.get("side_output_path")
+        analysis.front_output_path = result.get("front_output_path")
+        db.commit()
+        db.refresh(analysis)
+
+        responses.append(AnalysisResponse(
+            id=analysis.id,
+            athlete_id=analysis.athlete_id,
+            status=analysis.status,
+            risk=analysis.risk,
+            total_score=analysis.total_score,
+            csv_url=media_url(analysis.csv_path),
+            side_output_url=media_url(analysis.side_output_path),
+            front_output_url=media_url(analysis.front_output_path),
+            pose_model=analysis.pose_model,
+            created_at=analysis.created_at,
+        ))
+
+    return responses
 
 
 @router.delete("/{athlete_id}/analyses/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)

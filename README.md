@@ -36,9 +36,9 @@ npm start
 Mobil için:
 
 ```bash
-cd mobile
+cd frontend
 npm install
-npx expo start
+npm start
 ```
 
 ## Kullanım
@@ -55,6 +55,41 @@ npx expo start
 ```bash
 python main.py
 ```
+
+### Pose backend seçimi (MediaPipe / YOLO / RTMPose)
+
+Sistem üç pose-estimation backend'i destekler. Dashboard ve mobil uygulamada
+"Pose Model" seçiciyle, API'de `pose_model` form alanıyla, standalone'da ayrı
+giriş scriptiyle seçilir:
+
+| Backend | Giriş scripti | Keypoint | M4/M9/M10 | Test tarafı |
+|---------|---------------|----------|-----------|-------------|
+| MediaPipe | `python main.py` | 33 (BlazePose) | exact | otomatik (Z ile) |
+| YOLO | `python yolo_main.py --test_side right` | 17 (COCO) | proxy (yaklaşık) | manuel |
+| **RTMPose** | `python rtm_main.py --test_side right` | 133 (COCO-WholeBody) | **exact** | manuel |
+
+RTMPose-WholeBody, heel + toe keypoint'leri içerdiğinden M4/M9/M10 dahil tüm 17
+maddeyi proxy olmadan tam hesaplar (max skor 19). Z koordinatı olmadığından test
+tarafı YOLO gibi manuel verilir.
+
+#### RTMPose kurulumu
+
+```bash
+pip install rtmlib onnxruntime    # GPU için: pip install onnxruntime-gpu + RTM_DEVICE=cuda
+```
+
+ONNX ağırlıklarını **manuel indirmeye gerek yoktur**. `rtmlib` (RTMPose yazarının
+mmcv'siz resmi sarmalayıcısı) detector + WholeBody pose ONNX'lerini ilk çalıştırmada
+indirip `~/.cache/rtmlib/` altına cache'ler. Ayar `rtm_config.py` veya ortam
+değişkenleriyle yapılır:
+
+| Değişken | Varsayılan | Açıklama |
+|----------|------------|----------|
+| `RTM_MODE` | `performance` | `performance` (384x288, en doğru) · `balanced` · `lightweight` (hızlı) |
+| `RTM_DEVICE` | `cpu` | `cpu` · `cuda` (onnxruntime-gpu) · `mps` |
+| `RTM_BACKEND` | `onnxruntime` | inference backend |
+
+Modeller apache-2.0 lisanslıdır (OpenMMLab RTMW + YOLOX).
 
 ### Dashboard üzerinden analiz
 
@@ -82,7 +117,9 @@ Pose çıkarımı sırasında video landmark x/y koordinatları varsayılan olar
 | `less_rules.py` | 17 madde kural tabanlı puanlama |
 | `visualizer.py` | Ayrı ön/yan görsel çıktı videoları |
 | `report_generator.py` | CSV rapor üretimi |
-| `main.py` | Ana orkestrasyon |
+| `main.py` | Ana orkestrasyon (MediaPipe) |
+| `yolo_*.py` | YOLO backend (COCO-17, proxy M4/M9/M10) |
+| `rtm_*.py` | RTMPose-WholeBody backend (ONNX, exact M4/M9/M10) |
 
 ## Çıktılar
 

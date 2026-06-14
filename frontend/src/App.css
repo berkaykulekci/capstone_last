@@ -594,8 +594,7 @@ input:focus {
   color: var(--muted);
 }
 
-/* ── Pose Model Toggle ── */
-.model-toggle,
+/* ── Pose Model Toggle (legacy test-side) ── */
 .test-side-select {
   display: flex;
   flex-direction: column;
@@ -645,6 +644,117 @@ input:focus {
   color: var(--muted);
   margin: 0;
   line-height: 1.5;
+}
+
+/* ── Multi-model Checkboxes ── */
+.model-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.model-checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-checkbox-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  user-select: none;
+}
+
+.model-checkbox-item:hover {
+  border-color: #455264;
+}
+
+.model-checkbox-item.checked {
+  border-color: var(--cyan);
+  background: #0d2530;
+}
+
+.model-checkbox-item input[type="checkbox"] {
+  display: none;
+}
+
+.model-checkbox-box {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border-radius: 4px;
+  border: 1.5px solid #455264;
+  background: #0b1017;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+  transition: border-color .15s, background .15s;
+}
+
+.model-checkbox-box.checked {
+  border-color: var(--cyan);
+  background: var(--cyan);
+}
+
+.model-checkbox-tick {
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.model-checkbox-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.model-checkbox-content strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.model-multi-note {
+  font-size: 11px;
+  color: var(--cyan);
+  margin: 2px 0 0;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #0a2533;
+  border: 1px solid #15506b;
+}
+
+/* ── Comparison group in history ── */
+.analysis-comparison-group {
+  margin-bottom: 10px;
+}
+
+.comparison-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--cyan);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 4px 6px 8px;
+}
+
+.comparison-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.analysis-card.compact {
+  margin-bottom: 0;
 }
 
 @media (max-width: 900px) {

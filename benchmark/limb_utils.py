@@ -31,6 +31,17 @@ YOLO_KP_MAP = {
     'right_ankle':    16,
 }
 
+RTM_KP_MAP = {
+    'left_shoulder':  5,
+    'right_shoulder': 6,
+    'left_hip':       11,
+    'right_hip':      12,
+    'left_knee':      13,
+    'right_knee':     14,
+    'left_ankle':     15,
+    'right_ankle':    16,
+}
+
 
 # ── Yardımcı Fonksiyonlar ────────────────────────────────────────────────────
 

@@ -15,6 +15,10 @@ backend/yolov8x-pose.pt
 
 yolov8x-pose.pt
 
+# RTMPose-WholeBody ONNX weights (downloaded manually, not committed).
+models/
+*.onnx
+
 # Frontend
 frontend/node_modules/
 frontend/build/

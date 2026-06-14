@@ -1,6 +1,12 @@
-mediapipe>=0.10.0
+# Pin: mp.solutions.pose (legacy API the LESS engine uses) was removed after 0.10.14.
+mediapipe==0.10.14
 opencv-python>=4.8.0
 numpy>=1.24.0
 pandas>=2.0.0
 scipy>=1.10.0
 matplotlib>=3.7.0
+# RTMPose-WholeBody backend. Only needed for pose_model="rtm".
+# rtmlib downloads/caches the official ONNX models automatically on first run.
+# Use onnxruntime-gpu instead for CUDA acceleration (set RTM_DEVICE=cuda).
+rtmlib>=0.0.13
+onnxruntime>=1.17
