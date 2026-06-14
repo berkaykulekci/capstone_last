@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import './App.css';
 
 const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -24,6 +24,7 @@ function AuthScreen({ onAuth }) {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -41,7 +42,7 @@ function AuthScreen({ onAuth }) {
         });
         if (!registerRes.ok) {
           const body = await registerRes.json();
-          throw new Error(body.detail || 'Account could not be created');
+          throw new Error(body.detail || 'Kayıt oluşturulamadı.');
         }
       }
 
@@ -54,7 +55,7 @@ function AuthScreen({ onAuth }) {
         body: form,
       });
       const body = await loginRes.json();
-      if (!loginRes.ok) throw new Error(body.detail || 'Login failed');
+      if (!loginRes.ok) throw new Error(body.detail || 'Giriş başarısız.');
       onAuth(body.access_token);
     } catch (err) {
       setError(err.message);
@@ -65,24 +66,122 @@ function AuthScreen({ onAuth }) {
 
   return (
     <main className="auth-shell">
-      <section className="auth-panel">
-        <div className="brand-mark">S</div>
-        <h1>SportsMD</h1>
-        <p>{mode === 'login' ? 'Sign in to manage athletes and LESS analysis.' : 'Create your SportsMD workspace.'}</p>
-        <form onSubmit={submit} className="auth-form">
-          <label>Email</label>
-          <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />
-          <label>Password</label>
-          <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required />
-          {error && <div className="error-banner">{error}</div>}
-          <button className="primary-button" disabled={busy} type="submit">
-            {busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
-          </button>
-        </form>
-        <button className="text-button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-          {mode === 'login' ? 'Create an account' : 'Already have an account? Sign in'}
-        </button>
-      </section>
+      {/* LEFT SIDE: Visuals & Hover Scanner */}
+      <div className="auth-visual-side">
+        {/* Scanner Line Effect */}
+        <div className="scanner-line" />
+
+        {/* Background Image */}
+        <img
+          src="/runner.png"
+          alt="Biomechanical Runner"
+          className="auth-video-bg"
+        />
+
+        {/* Gradient overlay */}
+        <div className="auth-gradient-overlay" />
+
+        {/* Brand Overlay */}
+        <div className="brand-overlay">
+          <h1 className="brand-title">KINETIC</h1>
+          <p className="brand-subtitle">Performans Sistemleri</p>
+        </div>
+      </div>
+
+      {/* RIGHT SIDE: Form card */}
+      <div className="auth-form-side bg-tech-grid">
+        {/* Glow effect in background */}
+        <div className="card-glowing-glow" />
+
+        <div className="glass-card">
+          <header className="auth-form-header">
+            <h2>{mode === 'login' ? 'Doktor Girişi' : 'Doktor Kaydı'}</h2>
+            <p>
+              {mode === 'login'
+                ? 'Klinik analiz ve sporcu performans modülüne erişmek için kimlik bilgilerinizi doğrulayın.'
+                : 'Klinik analiz ve sporcu takip panelini kullanmak için yeni bir doktor hesabı oluşturun.'}
+            </p>
+          </header>
+
+          <form onSubmit={submit} className="auth-form-body">
+            {/* Email Input */}
+            <div className="form-group">
+              <label htmlFor="email">E-posta Adresi</label>
+              <div className="input-wrapper">
+                <span className="material-symbols-outlined">mail</span>
+                <input
+                  id="email"
+                  type="email"
+                  placeholder="dr.isim@klinik.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Password Input */}
+            <div className="form-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label htmlFor="password">Şifre</label>
+              </div>
+              <div className="input-wrapper">
+                <span className="material-symbols-outlined">lock</span>
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  aria-label="Şifreyi Göster"
+                  className="password-toggle-btn"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  <span className="material-symbols-outlined">
+                    {showPassword ? 'visibility' : 'visibility_off'}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Error Banner */}
+            {error && <div className="error-banner" style={{ marginTop: '16px' }}>{error}</div>}
+
+            {/* Submit Button */}
+            <button className="submit-btn" disabled={busy} type="submit">
+              <span className="submit-btn-glow" />
+              <span style={{ position: 'relative', zIndex: 1 }}>
+                {busy ? 'Lütfen bekleyin...' : mode === 'login' ? 'Giriş Yap' : 'Kayıt Ol'}
+              </span>
+              <span className="material-symbols-outlined" style={{ position: 'relative', zIndex: 1, fontSize: '18px' }}>
+                arrow_forward
+              </span>
+            </button>
+          </form>
+
+          {/* Form switch footer */}
+          <footer className="auth-form-footer">
+            <p>
+              {mode === 'login' ? 'Sisteme kaydolmak mı istiyorsunuz?' : 'Zaten bir hesabınız var mı?'}
+              <a
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setError('');
+                  setMode(mode === 'login' ? 'register' : 'login');
+                }}
+                style={{ marginLeft: '4px' }}
+              >
+                {mode === 'login' ? 'Hesap Oluşturun' : 'Giriş Yapın'}
+              </a>
+            </p>
+          </footer>
+        </div>
+      </div>
     </main>
   );
 }
