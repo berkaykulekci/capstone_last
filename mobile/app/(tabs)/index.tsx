@@ -12,8 +12,15 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_URL, useAuth } from '@/contexts/auth-context';
+
+const POSE_MODEL_KEY = 'sportsmd_pose_model';
+const TEST_SIDE_KEY  = 'sportsmd_test_side';
+
+type PoseModel = 'mediapipe' | 'yolo';
+type TestSide  = 'right' | 'left';
 
 type Analysis = {
   risk?: string;
@@ -48,9 +55,12 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
   const [name, setName] = useState('');
   const [sport, setSport] = useState('');
   const [team, setTeam] = useState('');
+  const [poseModel, setPoseModel] = useState<PoseModel>('mediapipe');
+  const [testSide, setTestSide] = useState<TestSide>('right');
 
   const stats = useMemo(() => {
     const high = athletes.filter((item) => item.latest_analysis?.risk === 'High').length;
@@ -71,10 +81,28 @@ export default function HomeScreen() {
   }, [token]);
 
   useEffect(() => {
-    loadAthletes()
-      .catch((err) => Alert.alert('Error', err.message))
-      .finally(() => setLoading(false));
+    async function init() {
+      const [storedModel, storedSide] = await Promise.all([
+        AsyncStorage.getItem(POSE_MODEL_KEY),
+        AsyncStorage.getItem(TEST_SIDE_KEY),
+      ]);
+      if (storedModel === 'yolo' || storedModel === 'mediapipe') setPoseModel(storedModel);
+      if (storedSide === 'left' || storedSide === 'right') setTestSide(storedSide);
+      await loadAthletes().catch((err) => Alert.alert('Error', err.message));
+      setLoading(false);
+    }
+    init();
   }, [loadAthletes]);
+
+  async function savePoseModel(value: PoseModel) {
+    setPoseModel(value);
+    await AsyncStorage.setItem(POSE_MODEL_KEY, value);
+  }
+
+  async function saveTestSide(value: TestSide) {
+    setTestSide(value);
+    await AsyncStorage.setItem(TEST_SIDE_KEY, value);
+  }
 
   async function refresh() {
     setRefreshing(true);
@@ -125,9 +153,23 @@ export default function HomeScreen() {
           <Text style={styles.title}>Athlete Dashboard</Text>
           <Text style={styles.subtitle}>{athletes.length} athletes assigned</Text>
         </View>
-        <TouchableOpacity style={styles.iconButton} onPress={logout}>
-          <Ionicons name="log-out-outline" size={22} color={C.text} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => setSettingsVisible(true)}>
+            <Ionicons name="settings-outline" size={22} color={C.text} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton} onPress={logout}>
+            <Ionicons name="log-out-outline" size={22} color={C.text} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Model badge */}
+      <View style={styles.modelBadgeRow}>
+        <View style={styles.modelBadge}>
+          <Text style={styles.modelBadgeText}>
+            {poseModel === 'yolo' ? 'YOLO Pose' : 'MediaPipe'}{poseModel === 'yolo' ? ` · ${testSide} leg` : ''}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.stats}>
@@ -175,6 +217,68 @@ export default function HomeScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.primaryButton} onPress={createAthlete}>
                 <Text style={styles.primaryText}>Create Athlete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Pose Model Settings Modal ── */}
+      <Modal visible={settingsVisible} transparent animationType="fade">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>Analysis Settings</Text>
+
+            <Text style={styles.settingLabel}>Pose Model</Text>
+            <View style={styles.toggleRow}>
+              <TouchableOpacity
+                style={[styles.toggleBtn, poseModel === 'mediapipe' && styles.toggleBtnActive]}
+                onPress={() => savePoseModel('mediapipe')}
+              >
+                <Text style={[styles.toggleText, poseModel === 'mediapipe' && styles.toggleTextActive]}>
+                  MediaPipe
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toggleBtn, poseModel === 'yolo' && styles.toggleBtnActive]}
+                onPress={() => savePoseModel('yolo')}
+              >
+                <Text style={[styles.toggleText, poseModel === 'yolo' && styles.toggleTextActive]}>
+                  YOLO
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {poseModel === 'yolo' && (
+              <>
+                <Text style={styles.settingLabel}>Test Leg (side camera)</Text>
+                <View style={styles.toggleRow}>
+                  <TouchableOpacity
+                    style={[styles.toggleBtn, testSide === 'right' && styles.toggleBtnActive]}
+                    onPress={() => saveTestSide('right')}
+                  >
+                    <Text style={[styles.toggleText, testSide === 'right' && styles.toggleTextActive]}>
+                      Right
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.toggleBtn, testSide === 'left' && styles.toggleBtnActive]}
+                    onPress={() => saveTestSide('left')}
+                  >
+                    <Text style={[styles.toggleText, testSide === 'left' && styles.toggleTextActive]}>
+                      Left
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.settingNote}>
+                  YOLO Pose doesn't include heel/toe landmarks. M4, M9, M10 will be N/A (max score: 16).
+                </Text>
+              </>
+            )}
+
+            <View style={[styles.modalActions, { marginTop: 16 }]}>
+              <TouchableOpacity style={styles.primaryButton} onPress={() => setSettingsVisible(false)}>
+                <Text style={styles.primaryText}>Done</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -337,6 +441,69 @@ const styles = StyleSheet.create({
     backgroundColor: C.surface,
     padding: 22,
     gap: 12,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  modelBadgeRow: {
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  modelBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#103140',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#15506B',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  modelBadgeText: {
+    color: C.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  settingLabel: {
+    color: C.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toggleBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: '#0f141b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toggleBtnActive: {
+    borderColor: C.primary,
+    backgroundColor: '#103140',
+  },
+  toggleText: {
+    color: C.muted,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  toggleTextActive: {
+    color: C.primary,
+  },
+  settingNote: {
+    color: C.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 8,
   },
   modalTitle: {
     color: C.text,

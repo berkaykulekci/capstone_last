@@ -38,6 +38,7 @@ class Analysis(Base):
     csv_path = Column(String, nullable=True)
     side_output_path = Column(String, nullable=True)
     front_output_path = Column(String, nullable=True)
+    pose_model = Column(String, default="mediapipe", nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     athlete = relationship("Athlete", back_populates="analyses")

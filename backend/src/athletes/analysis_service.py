@@ -11,6 +11,21 @@ from ..less_engine.less_rules import evaluate_yan_kamera, evaluate_on_kamera, co
 from ..less_engine.report_generator import generate_csv
 from ..less_engine.visualizer import create_camera_video
 
+from ..less_engine.yolo_config import (
+    NORMALIZE_VIDEO_FRAME_COORDS as YOLO_NORMALIZE,
+    NORMALIZED_FRAME_WIDTH as YOLO_FRAME_WIDTH,
+)
+from ..less_engine.yolo_pose_extractor import extract_poses as yolo_extract_poses
+from ..less_engine.yolo_jump_detector import detect_jumps as yolo_detect_jumps
+from ..less_engine.yolo_less_rules import (
+    evaluate_yan_kamera as yolo_evaluate_yan,
+    evaluate_on_kamera as yolo_evaluate_on,
+    combine_results as yolo_combine_results,
+    compute_total_score as yolo_compute_total_score,
+    YOLO_NA_MADDE,
+)
+from ..less_engine.yolo_visualizer import create_yolo_camera_video
+
 
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "media")).resolve()
 
@@ -80,3 +95,110 @@ def run_less_analysis(side_video_path: str, front_video_path: str, output_dir: P
         "jumps_yan": jumps_yan,
         "jumps_on": jumps_on,
     }
+
+
+def run_yolo_less_analysis(
+    side_video_path: str,
+    front_video_path: str,
+    output_dir: Path,
+    test_side: str = "right",
+) -> dict:
+    """
+    YOLO Pose tabanlı LESS analizi.
+
+    MediaPipe sürümünden farklar:
+      - test_side otomatik belirlenemiyor (Z yok) → parametre olarak alınır
+      - M4, M9, M10 hesaplanamaz → yolo_na_madde listesinde döner
+      - total_score max 16'dır (19 yerine)
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    yan_poses, yan_w, yan_h, yan_fps, _ = yolo_extract_poses(side_video_path)
+    on_poses,  on_w,  on_h,  on_fps,  _ = yolo_extract_poses(front_video_path)
+
+    jumps_yan = yolo_detect_jumps(yan_poses, test_side, label="YAN")
+    jumps_on  = yolo_detect_jumps(on_poses,  test_side, label="ON")
+
+    if not jumps_yan:
+        raise RuntimeError("[YOLO] Yan kamera videosunda iniş tespit edilemedi.")
+    if not jumps_on:
+        raise RuntimeError("[YOLO] Ön kamera videosunda iniş tespit edilemedi.")
+
+    on_analysis_width = YOLO_FRAME_WIDTH if YOLO_NORMALIZE else on_w
+
+    yan_results = yolo_evaluate_yan(yan_poses, jumps_yan, test_side)
+    on_results  = yolo_evaluate_on(on_poses, jumps_on, test_side, on_analysis_width)
+    combined    = yolo_combine_results(yan_results, on_results)
+
+    total_score, skorlar, yaklasik_maddeler = yolo_compute_total_score(combined)
+
+    csv_path         = output_dir / "yolo_less_sonuclar.csv"
+    side_output_path = output_dir / "gorsel_analiz_yan.mp4"
+    front_output_path = output_dir / "gorsel_analiz_on.mp4"
+
+    _write_yolo_csv(str(csv_path), combined, skorlar, total_score, test_side, yaklasik_maddeler)
+
+    create_yolo_camera_video(
+        side_video_path, yan_poses, jumps_yan, yan_results, "yan", str(side_output_path))
+    create_yolo_camera_video(
+        front_video_path, on_poses, jumps_on, on_results, "on", str(front_output_path))
+
+    return {
+        "total_score": total_score,
+        "risk": score_to_risk(total_score),
+        "csv_path": str(csv_path),
+        "side_output_path": str(side_output_path),
+        "front_output_path": str(front_output_path),
+        "jumps_yan": jumps_yan,
+        "jumps_on": jumps_on,
+        "yolo_na_madde": [],
+        "yolo_yaklasik_madde": yaklasik_maddeler,
+        "pose_model": "yolo",
+    }
+
+
+def _write_yolo_csv(path: str, combined, skorlar, toplam, test_side, yaklasik_maddeler=None):
+    import pandas as pd
+    from ..less_engine.report_generator import MADDE_ISIMLERI, MADDE_SIRASI
+    if yaklasik_maddeler is None:
+        yaklasik_maddeler = []
+
+    rows = []
+    for mk in MADDE_SIRASI:
+        m_name, kamera = MADDE_ISIMLERI[mk]
+        m_no = int(mk[1:])
+        puanlar = []
+        row = {
+            'model': 'yolo',
+            'test_tarafi': test_side,
+            'madde_no': m_no,
+            'madde_adi': m_name,
+            'kamera': kamera,
+            'yaklaşık': m_no in yaklasik_maddeler,
+        }
+        for idx, jump_res in enumerate(combined):
+            if mk in jump_res:
+                r = jump_res[mk]
+                row[f'atlayis_{idx+1}_deger'] = r['olcum']
+                row[f'atlayis_{idx+1}_puan'] = r['puan']
+                puanlar.append(r['puan'])
+            else:
+                row[f'atlayis_{idx+1}_deger'] = '-'
+                row[f'atlayis_{idx+1}_puan'] = '-'
+                puanlar.append(0)
+        for missing in range(len(combined), 3):
+            row[f'atlayis_{missing+1}_deger'] = '-'
+            row[f'atlayis_{missing+1}_puan'] = '-'
+            puanlar.append(0)
+        row['karar_puani'] = skorlar.get(mk, 0)
+        rows.append(row)
+
+    rows.append({
+        'model': 'yolo', 'test_tarafi': test_side,
+        'madde_no': '', 'madde_adi': 'TOPLAM LESS PUANI', 'kamera': '', 'yaklaşık': False,
+        'atlayis_1_deger': '', 'atlayis_1_puan': '',
+        'atlayis_2_deger': '', 'atlayis_2_puan': '',
+        'atlayis_3_deger': '', 'atlayis_3_puan': '',
+        'karar_puani': toplam,
+    })
+    pd.DataFrame(rows).to_csv(path, index=False, encoding='utf-8-sig')

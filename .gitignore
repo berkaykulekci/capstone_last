@@ -10,6 +10,8 @@ env/
 backend/media/
 backend/sportsmd.db
 backend/.env
+# Downloaded YOLO weights are fetched on demand by Ultralytics.
+backend/yolov8x-pose.pt
 
 # Frontend
 frontend/node_modules/

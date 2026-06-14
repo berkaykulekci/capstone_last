@@ -203,9 +203,140 @@ function UploadBox({ label, file, onChange }) {
   );
 }
 
+function ModelToggle({ value, onChange }) {
+  return (
+    <div className="model-toggle">
+      <span className="model-toggle-label">Pose Model</span>
+      <div className="model-toggle-buttons">
+        <button
+          type="button"
+          className={value === 'mediapipe' ? 'model-btn active' : 'model-btn'}
+          onClick={() => onChange('mediapipe')}
+        >
+          MediaPipe
+        </button>
+        <button
+          type="button"
+          className={value === 'yolo' ? 'model-btn active' : 'model-btn'}
+          onClick={() => onChange('yolo')}
+        >
+          YOLO
+        </button>
+      </div>
+      {value === 'yolo' && (
+        <p className="model-note">M4 (plantar fleksiyon), M9 (iç rot), M10 (dış rot) maddeleri toe/heel landmark olmadığından proxy yöntemle yaklaşık hesaplanır. Max skor: 19, yaklaşık maddeler CSV'de işaretlenir.</p>
+      )}
+    </div>
+  );
+}
+
+function TestSideSelect({ value, onChange }) {
+  return (
+    <div className="test-side-select">
+      <span className="model-toggle-label">Test Leg (YOLO)</span>
+      <div className="model-toggle-buttons">
+        <button
+          type="button"
+          className={value === 'right' ? 'model-btn active' : 'model-btn'}
+          onClick={() => onChange('right')}
+        >
+          Right
+        </button>
+        <button
+          type="button"
+          className={value === 'left' ? 'model-btn active' : 'model-btn'}
+          onClick={() => onChange('left')}
+        >
+          Left
+        </button>
+      </div>
+      <p className="model-note">Which leg faces the side camera?</p>
+    </div>
+  );
+}
+
+function ModelBadge({ model }) {
+  const isYolo = (model || '').toLowerCase() === 'yolo';
+  return (
+    <span className={`pill ${isYolo ? 'blue' : ''}`} style={{ fontSize: 11 }}>
+      {isYolo ? 'YOLO' : 'MediaPipe'}
+    </span>
+  );
+}
+
+function AnalysisCard({ analysis, athleteName, onError, onDelete }) {
+  const date = new Date(analysis.created_at).toLocaleString('tr-TR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+
+  async function downloadCsv() {
+    try {
+      const res = await fetch(apiUrl(analysis.csv_url));
+      if (!res.ok) throw new Error('CSV could not be downloaded');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${athleteName.replace(/\s+/g, '_')}_${analysis.id}_less.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      onError(err.message);
+    }
+  }
+
+  return (
+    <div className="analysis-card">
+      <div className="analysis-card-header">
+        <div className="analysis-card-meta">
+          <ModelBadge model={analysis.pose_model} />
+          <span className={`pill ${riskClass(analysis.risk)}`}>{analysis.risk || 'No data'}</span>
+          <strong className="analysis-score">
+            {analysis.total_score ?? '-'} <span>puan</span>
+          </strong>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <small>{date}</small>
+          {onDelete && (
+            <button
+              type="button"
+              className="delete-analysis-btn"
+              onClick={() => onDelete(analysis.id)}
+              title="Analizi Sil"
+            >
+              Sil
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="output-grid">
+        {analysis.csv_url && (
+          <button type="button" onClick={downloadCsv}>CSV Rapor</button>
+        )}
+        {analysis.side_output_url && (
+          <a href={apiUrl(analysis.side_output_url)} target="_blank" rel="noreferrer">Yan Video</a>
+        )}
+        {analysis.front_output_url && (
+          <a href={apiUrl(analysis.front_output_url)} target="_blank" rel="noreferrer">Ön Video</a>
+        )}
+        {!analysis.csv_url && !analysis.side_output_url && !analysis.front_output_url && (
+          <span style={{ color: 'var(--muted)', fontSize: 13 }}>
+            {analysis.status === 'failed' ? 'Analiz başarısız.' : 'Çıktı yok.'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AthleteDetail({ athlete, onBack, onAnalysed }) {
   const [sideFile, setSideFile] = useState(null);
   const [frontFile, setFrontFile] = useState(null);
+  const [poseModel, setPoseModel] = useState('mediapipe');
+  const [testSide, setTestSide] = useState('right');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -219,6 +350,8 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
     const form = new FormData();
     form.append('side_video', sideFile);
     form.append('front_video', frontFile);
+    form.append('pose_model', poseModel);
+    form.append('test_side', testSide);
 
     try {
       const token = localStorage.getItem('sportsmd_token');
@@ -237,26 +370,32 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
     }
   }
 
-  const analysis = athlete.latest_analysis;
-
-  async function downloadCsv() {
-    if (!analysis?.csv_url) return;
+  async function deleteAnalysis(analysisId) {
+    if (!window.confirm("Bu analizi silmek istediğinizden emin misiniz?")) {
+      return;
+    }
+    setBusy(true);
+    setError('');
     try {
-      const res = await fetch(apiUrl(analysis.csv_url));
-      if (!res.ok) throw new Error('CSV could not be downloaded');
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${athlete.name.replace(/\s+/g, '_')}_less_sonuclar.csv`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const token = localStorage.getItem('sportsmd_token');
+      const res = await fetch(`${API_BASE}/athletes/${athlete.id}/analyses/${analysisId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.detail || 'Analysis deletion failed');
+      }
+      onAnalysed();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setBusy(false);
     }
   }
+
+  const analyses = athlete.analyses || [];
+  const latest = athlete.latest_analysis;
 
   return (
     <main className="detail-layout">
@@ -267,15 +406,15 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
             <div className="avatar large">{initials(athlete.name)}</div>
             <h2>{athlete.name}</h2>
             <p>{athlete.sport || '-'} · {athlete.team || '-'}</p>
-            <span className={`pill ${riskClass(analysis?.risk)}`}>{analysis?.risk || 'No data'}</span>
+            <span className={`pill ${riskClass(latest?.risk)}`}>{latest?.risk || 'No data'}</span>
             <div className="invite-box">
               <span>Athlete ID</span>
               <strong>{athlete.id}</strong>
             </div>
           </section>
           <section className="info-card">
-            <div><span>Score</span><strong>{analysis?.total_score ?? '-'}</strong></div>
-            <div><span>Status</span><strong>{analysis?.status || '-'}</strong></div>
+            <div><span>Latest Score</span><strong>{latest?.total_score ?? '-'}</strong></div>
+            <div><span>Analyses</span><strong>{analyses.length}</strong></div>
           </section>
         </aside>
 
@@ -286,6 +425,8 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
               <UploadBox label="Side view (sagittal)" file={sideFile} onChange={setSideFile} />
               <UploadBox label="Front view (frontal)" file={frontFile} onChange={setFrontFile} />
             </div>
+            <ModelToggle value={poseModel} onChange={setPoseModel} />
+            {poseModel === 'yolo' && <TestSideSelect value={testSide} onChange={setTestSide} />}
             <div className="upload-actions-row">
               <button className="primary-button" onClick={analyse} disabled={busy}>
                 {busy ? 'Analysing...' : 'Upload & Analyse'}
@@ -295,22 +436,26 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
           </div>
 
           <div className="outputs-panel">
-            <h2>Outputs <span>{busy ? 0 : analysis ? 3 : 0}</span></h2>
+            <h2>Analysis History <span>{busy ? '…' : analyses.length}</span></h2>
             {busy && (
               <div className="processing-state" role="status" aria-live="polite">
                 <div className="spinner" />
-                <strong>Analysis processing</strong>
-                <span>Videos are being analysed and output files are being generated.</span>
+                <strong>Processing...</strong>
+                <span>Action in progress.</span>
               </div>
             )}
-            {!busy && !analysis && <div className="empty-state">No videos uploaded yet.</div>}
-            {!busy && analysis && (
-              <div className="output-grid">
-                <button type="button" onClick={downloadCsv}>Download CSV Report</button>
-                <a href={apiUrl(analysis.side_output_url)} target="_blank" rel="noreferrer">Side Analysis Video</a>
-                <a href={apiUrl(analysis.front_output_url)} target="_blank" rel="noreferrer">Front Analysis Video</a>
-              </div>
+            {!busy && analyses.length === 0 && (
+              <div className="empty-state">No analyses yet.</div>
             )}
+            {!busy && analyses.map((a) => (
+              <AnalysisCard
+                key={a.id}
+                analysis={a}
+                athleteName={athlete.name}
+                onError={setError}
+                onDelete={deleteAnalysis}
+              />
+            ))}
           </div>
         </section>
       </div>
