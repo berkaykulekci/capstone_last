@@ -1,0 +1,7 @@
+video,model,total_frames,fps,latency_ms,missing_kp_pct,jitter_coord_std,jitter_accel_mean,limb_self_std,limb_anthropo_pct,biomech_self_std,biomech_anthropo_pct,mean_confidence
+on_kamera.MOV,MediaPipe,266,18.8470,53.0588,0.3759,0.0148,0.0071,0.1392,54.8872,5.1830,95.4887,0.9104
+on_kamera.MOV,YOLO,266,4.0807,245.0539,2.3220,0.0148,0.0075,0.1261,26.6917,5.2554,95.1128,0.9714
+on_kamera.MOV,OurModel,266,18.1704,55.0347,0.3759,0.0148,0.0071,0.1392,54.8872,5.1830,95.4887,0.9104
+yan_kamera.mp4,MediaPipe,324,18.5285,53.9709,0.0000,0.0187,0.0109,0.1616,45.9877,22.1518,58.1790,0.8029
+yan_kamera.mp4,YOLO,324,3.4974,285.9288,20.6245,0.0135,0.0081,0.1736,47.2222,20.6132,61.8827,0.9598
+yan_kamera.mp4,OurModel,324,18.2480,54.8005,0.0000,0.0187,0.0109,0.1616,45.9877,22.1518,58.1790,0.8029

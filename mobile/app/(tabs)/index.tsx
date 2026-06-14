@@ -5,6 +5,7 @@ import {
   FlatList,
   Modal,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Directory, File as ExpoFile } from 'expo-file-system';
 
 import { API_URL, useAuth } from '@/contexts/auth-context';
 
@@ -23,9 +25,15 @@ type PoseModel = 'mediapipe' | 'yolo';
 type TestSide  = 'right' | 'left';
 
 type Analysis = {
+  id: string;
   risk?: string;
   status?: string;
   total_score?: number;
+  csv_url?: string | null;
+  side_output_url?: string | null;
+  front_output_url?: string | null;
+  pose_model?: string | null;
+  created_at?: string;
 };
 
 type Athlete = {
@@ -34,6 +42,22 @@ type Athlete = {
   sport?: string;
   team?: string;
   latest_analysis?: Analysis | null;
+  analyses?: Analysis[];
+};
+
+type PickedVideo = {
+  uri: string;
+  name: string;
+  type: string;
+};
+
+const VIDEO_EXTENSIONS = ['mp4', 'mov', 'm4v', 'avi', 'qt'];
+const VIDEO_MIME_BY_EXTENSION: Record<string, string> = {
+  avi: 'video/x-msvideo',
+  m4v: 'video/x-m4v',
+  mov: 'video/quicktime',
+  mp4: 'video/mp4',
+  qt: 'video/quicktime',
 };
 
 const C = {
@@ -49,9 +73,79 @@ const C = {
   green: '#37C563',
 };
 
+function apiUrl(path?: string | null) {
+  if (!path) return '';
+  return path.startsWith('http') ? path : `${API_URL}${path}`;
+}
+
+function extensionFromName(value: string) {
+  const cleanValue = value.split('?')[0] || '';
+  const extension = cleanValue.includes('.') ? cleanValue.split('.').pop() : '';
+  return (extension || '').toLowerCase();
+}
+
+function mimeForVideo(name: string, mimeType?: string) {
+  const extension = extensionFromName(name);
+  if (mimeType && mimeType !== 'application/octet-stream') return mimeType;
+  return VIDEO_MIME_BY_EXTENSION[extension] || 'video/mp4';
+}
+
+function normalisePickedVideo(file: unknown): PickedVideo | null {
+  const picked = file as { uri?: string; name?: string; type?: string };
+  if (!picked?.uri) return null;
+
+  const name = picked.name || decodeURIComponent(picked.uri.split('/').pop() || 'video.mp4');
+  return {
+    uri: picked.uri,
+    name,
+    type: mimeForVideo(name, picked.type),
+  };
+}
+
+function isSupportedVideo(file: PickedVideo) {
+  const extension = extensionFromName(file.name || file.uri);
+  return VIDEO_EXTENSIONS.includes(extension) || file.type.startsWith('video/');
+}
+
+function uploadPart(file: PickedVideo) {
+  return {
+    uri: file.uri,
+    name: file.name || file.uri.split('/').pop() || 'video.mp4',
+    type: mimeForVideo(file.name || file.uri, file.type),
+  };
+}
+
+function formatDate(value?: string) {
+  if (!value) return '';
+  return new Date(value).toLocaleString('tr-TR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function safeFileName(value: string) {
+  return value
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    || `sportsmd_output_${Date.now()}`;
+}
+
+function outputFileName(path: string, fallbackName: string) {
+  const lastPart = decodeURIComponent((path.split('?')[0] || '').split('/').pop() || '');
+  return safeFileName(lastPart || fallbackName);
+}
+
+function isAuthError(status: number, detail?: string) {
+  return status === 401 || (detail || '').toLowerCase().includes('validate credentials');
+}
+
 export default function HomeScreen() {
   const { token, logout } = useAuth();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -75,10 +169,19 @@ export default function HomeScreen() {
     });
     if (!res.ok) {
       const body = await res.json();
+      if (isAuthError(res.status, body.detail)) {
+        await logout();
+        return;
+      }
       throw new Error(body.detail || 'Could not load athletes');
     }
-    setAthletes(await res.json());
-  }, [token]);
+    const items: Athlete[] = await res.json();
+    setAthletes(items);
+    setSelectedAthlete((current) => {
+      if (!current) return null;
+      return items.find((item) => item.id === current.id) || current;
+    });
+  }, [logout, token]);
 
   useEffect(() => {
     async function init() {
@@ -127,15 +230,21 @@ export default function HomeScreen() {
 
     if (!res.ok) {
       const body = await res.json();
+      if (isAuthError(res.status, body.detail)) {
+        await logout();
+        return;
+      }
       Alert.alert('Error', body.detail || 'Athlete could not be created');
       return;
     }
 
+    const created: Athlete = await res.json();
     setName('');
     setSport('');
     setTeam('');
     setModalVisible(false);
-    await refresh();
+    setSelectedAthlete(created);
+    await loadAthletes();
   }
 
   if (loading) {
@@ -143,6 +252,20 @@ export default function HomeScreen() {
       <View style={styles.center}>
         <ActivityIndicator color={C.primary} size="large" />
       </View>
+    );
+  }
+
+  if (selectedAthlete) {
+    return (
+      <AthleteDetail
+        athlete={selectedAthlete}
+        token={token}
+        poseModel={poseModel}
+        testSide={testSide}
+        onBack={() => setSelectedAthlete(null)}
+        onSessionExpired={logout}
+        onRefresh={loadAthletes}
+      />
     );
   }
 
@@ -191,7 +314,7 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
         ListEmptyComponent={<Text style={styles.empty}>No athletes yet.</Text>}
         renderItem={({ item }) => (
-          <View style={styles.row}>
+          <TouchableOpacity style={styles.row} onPress={() => setSelectedAthlete(item)} activeOpacity={0.78}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
             </View>
@@ -200,7 +323,8 @@ export default function HomeScreen() {
               <Text style={styles.rowMeta}>{item.sport || '-'} · {item.team || '-'}</Text>
             </View>
             <Text style={styles.pill}>{item.latest_analysis?.risk || 'No data'}</Text>
-          </View>
+            <Ionicons name="chevron-forward" size={18} color={C.muted} />
+          </TouchableOpacity>
         )}
       />
 
@@ -271,7 +395,7 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.settingNote}>
-                  YOLO Pose doesn't include heel/toe landmarks. M4, M9, M10 will be N/A (max score: 16).
+                  YOLO Pose does not include heel/toe landmarks. M4, M9, M10 will be N/A (max score: 16).
                 </Text>
               </>
             )}
@@ -285,6 +409,278 @@ export default function HomeScreen() {
         </View>
       </Modal>
     </View>
+  );
+}
+
+function AthleteDetail({
+  athlete,
+  token,
+  poseModel,
+  testSide,
+  onBack,
+  onSessionExpired,
+  onRefresh,
+}: {
+  athlete: Athlete;
+  token: string | null;
+  poseModel: PoseModel;
+  testSide: TestSide;
+  onBack: () => void;
+  onSessionExpired: () => Promise<void>;
+  onRefresh: () => Promise<void>;
+}) {
+  const [sideFile, setSideFile] = useState<PickedVideo | null>(null);
+  const [frontFile, setFrontFile] = useState<PickedVideo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [downloadingOutput, setDownloadingOutput] = useState<string | null>(null);
+  const analyses = athlete.analyses || [];
+  const latest = athlete.latest_analysis;
+
+  async function pickVideo(target: 'side' | 'front') {
+    try {
+      const picked = await ExpoFile.pickFileAsync();
+      const file = Array.isArray(picked) ? picked[0] : picked;
+      const video = normalisePickedVideo(file);
+      if (!video) {
+        Alert.alert('Video could not be selected', 'Please choose the video again from Files.');
+        return;
+      }
+      if (!isSupportedVideo(video)) {
+        Alert.alert('Unsupported format', 'Please choose an MP4, MOV, M4V, or AVI video.');
+        return;
+      }
+      if (target === 'side') {
+        setSideFile(video);
+      } else {
+        setFrontFile(video);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '';
+      if (!message.toLowerCase().includes('cancel')) {
+        Alert.alert('Error', message || 'Video could not be selected');
+      }
+    }
+  }
+
+  async function analyse() {
+    if (!sideFile || !frontFile) {
+      Alert.alert('Missing videos', 'Please select both side and front videos.');
+      return;
+    }
+
+    setBusy(true);
+    const form = new FormData();
+    form.append('side_video', uploadPart(sideFile) as unknown as Blob);
+    form.append('front_video', uploadPart(frontFile) as unknown as Blob);
+    form.append('pose_model', poseModel);
+    form.append('test_side', testSide);
+
+    try {
+      const res = await fetch(`${API_URL}/athletes/${athlete.id}/analyse`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const body = await res.json();
+      if (!res.ok && isAuthError(res.status, body.detail)) {
+        await onSessionExpired();
+        return;
+      }
+      if (!res.ok) throw new Error(body.detail || 'Analysis failed');
+      setSideFile(null);
+      setFrontFile(null);
+      await onRefresh();
+      Alert.alert('Analysis complete', 'The athlete analysis is ready.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Analysis failed';
+      Alert.alert('Error', message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteAnalysis(analysisId: string) {
+    Alert.alert('Delete analysis', 'Are you sure you want to delete this analysis?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          setBusy(true);
+          try {
+            const res = await fetch(`${API_URL}/athletes/${athlete.id}/analyses/${analysisId}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) {
+              const body = await res.json();
+              if (isAuthError(res.status, body.detail)) {
+                await onSessionExpired();
+                return;
+              }
+              throw new Error(body.detail || 'Analysis deletion failed');
+            }
+            await onRefresh();
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Analysis deletion failed';
+            Alert.alert('Error', message);
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
+  }
+
+  async function downloadOutput(path: string, fallbackName: string, title: string) {
+    const fileKey = `${title}-${path}`;
+    setDownloadingOutput(fileKey);
+    try {
+      const directory = await Directory.pickDirectoryAsync();
+      const filename = outputFileName(path, fallbackName);
+      await ExpoFile.downloadFileAsync(apiUrl(path), directory, {
+        idempotent: true,
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      Alert.alert('Download complete', `${title} saved as ${filename}.`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '';
+      if (!message.toLowerCase().includes('cancel')) {
+        Alert.alert('Download failed', message || 'Output could not be downloaded');
+      }
+    } finally {
+      setDownloadingOutput(null);
+    }
+  }
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.detailContent}>
+      <View style={styles.detailHeader}>
+        <TouchableOpacity style={styles.backIconButton} onPress={onBack}>
+          <Ionicons name="arrow-back" size={22} color={C.primary} />
+        </TouchableOpacity>
+        <View style={styles.detailHeaderCopy}>
+          <Text style={styles.title}>{athlete.name}</Text>
+          <Text style={styles.subtitle}>{athlete.sport || '-'} · {athlete.team || '-'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.profileCard}>
+        <View style={styles.profileTopRow}>
+          <View style={styles.avatarLarge}>
+            <Text style={styles.avatarLargeText}>{athlete.name.charAt(0).toUpperCase()}</Text>
+          </View>
+          <View style={styles.profileStats}>
+            <Text style={styles.profileLabel}>Latest Score</Text>
+            <Text style={styles.profileValue}>{latest?.total_score ?? '-'}</Text>
+          </View>
+          <View style={styles.profileStats}>
+            <Text style={styles.profileLabel}>Analyses</Text>
+            <Text style={styles.profileValue}>{analyses.length}</Text>
+          </View>
+        </View>
+        <View style={styles.athleteIdBox}>
+          <Text style={styles.profileLabel}>Athlete ID</Text>
+          <Text style={styles.athleteIdText}>{athlete.id}</Text>
+        </View>
+      </View>
+
+      <View style={styles.uploadPanel}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Upload Video</Text>
+          <Text style={styles.modelBadgeText}>
+            {poseModel === 'yolo' ? `YOLO · ${testSide}` : 'MediaPipe'}
+          </Text>
+        </View>
+
+        <UploadButton
+          label="Side view (sagittal)"
+          fileName={sideFile?.name}
+          onPress={() => pickVideo('side')}
+        />
+        <UploadButton
+          label="Front view (frontal)"
+          fileName={frontFile?.name}
+          onPress={() => pickVideo('front')}
+        />
+
+        <TouchableOpacity style={[styles.analyseButton, busy && styles.disabledButton]} onPress={analyse} disabled={busy}>
+          {busy ? <ActivityIndicator color="#fff" /> : <Ionicons name="cloud-upload-outline" size={20} color="#fff" />}
+          <Text style={styles.primaryText}>{busy ? 'Analysing...' : 'Upload & Analyse'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.uploadPanel}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Analysis History</Text>
+          <Text style={styles.historyCount}>{busy ? '...' : analyses.length}</Text>
+        </View>
+        {analyses.length === 0 ? (
+          <Text style={styles.emptyInline}>No analyses yet.</Text>
+        ) : (
+          analyses.map((analysis) => (
+            <View key={analysis.id} style={styles.analysisCard}>
+              <View style={styles.analysisTopRow}>
+                <Text style={styles.pill}>{analysis.risk || 'No data'}</Text>
+                <Text style={styles.analysisScore}>{analysis.total_score ?? '-'} puan</Text>
+              </View>
+              <Text style={styles.analysisMeta}>
+                {(analysis.pose_model || 'mediapipe').toUpperCase()} · {formatDate(analysis.created_at)}
+              </Text>
+              <View style={styles.analysisActions}>
+                {analysis.csv_url && (
+                  <TouchableOpacity
+                    style={styles.outputButton}
+                    onPress={() => downloadOutput(analysis.csv_url!, `${analysis.id}_less.csv`, 'CSV report')}
+                    disabled={downloadingOutput === `CSV report-${analysis.csv_url}`}
+                  >
+                    {downloadingOutput === `CSV report-${analysis.csv_url}` && <ActivityIndicator color={C.primary} size="small" />}
+                    <Text style={styles.outputButtonText}>Download CSV</Text>
+                  </TouchableOpacity>
+                )}
+                {analysis.side_output_url && (
+                  <TouchableOpacity
+                    style={styles.outputButton}
+                    onPress={() => downloadOutput(analysis.side_output_url!, `${analysis.id}_side.mp4`, 'Side video')}
+                    disabled={downloadingOutput === `Side video-${analysis.side_output_url}`}
+                  >
+                    {downloadingOutput === `Side video-${analysis.side_output_url}` && <ActivityIndicator color={C.primary} size="small" />}
+                    <Text style={styles.outputButtonText}>Download Side</Text>
+                  </TouchableOpacity>
+                )}
+                {analysis.front_output_url && (
+                  <TouchableOpacity
+                    style={styles.outputButton}
+                    onPress={() => downloadOutput(analysis.front_output_url!, `${analysis.id}_front.mp4`, 'Front video')}
+                    disabled={downloadingOutput === `Front video-${analysis.front_output_url}`}
+                  >
+                    {downloadingOutput === `Front video-${analysis.front_output_url}` && <ActivityIndicator color={C.primary} size="small" />}
+                    <Text style={styles.outputButtonText}>Download Front</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.deleteButton} onPress={() => deleteAnalysis(analysis.id)} disabled={busy}>
+                  <Ionicons name="trash-outline" size={16} color="#ff6b6b" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+    </ScrollView>
+  );
+}
+
+function UploadButton({ label, fileName, onPress }: { label: string; fileName?: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.uploadBox} onPress={onPress} activeOpacity={0.78}>
+      <Ionicons name="videocam-outline" size={24} color={C.primary} />
+      <View style={styles.uploadCopy}>
+        <Text style={styles.uploadLabel}>{label}</Text>
+        <Text style={styles.uploadMeta} numberOfLines={1}>{fileName || 'MP4, MOV, AVI'}</Text>
+      </View>
+      <Ionicons name="add-circle-outline" size={22} color={C.muted} />
+    </TouchableOpacity>
   );
 }
 
@@ -303,6 +699,10 @@ const styles = StyleSheet.create({
     backgroundColor: C.bg,
     padding: 20,
     paddingTop: 62,
+  },
+  detailContent: {
+    gap: 14,
+    paddingBottom: 48,
   },
   center: {
     flex: 1,
@@ -463,6 +863,206 @@ const styles = StyleSheet.create({
     color: C.primary,
     fontSize: 11,
     fontWeight: '700',
+  },
+  detailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  backIconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#15506B',
+    backgroundColor: '#103140',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailHeaderCopy: {
+    flex: 1,
+  },
+  profileCard: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surface,
+    padding: 16,
+    gap: 14,
+  },
+  profileTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatarLarge: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: '#103140',
+    borderWidth: 1,
+    borderColor: '#15506B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarLargeText: {
+    color: C.primary,
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  profileStats: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: '#0f141b',
+    padding: 12,
+  },
+  profileLabel: {
+    color: C.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  profileValue: {
+    color: C.text,
+    fontSize: 24,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  athleteIdBox: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: '#0D1219',
+    padding: 12,
+  },
+  athleteIdText: {
+    color: C.primary,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  uploadPanel: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surface,
+    padding: 16,
+    gap: 12,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  sectionTitle: {
+    color: C.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  uploadBox: {
+    minHeight: 76,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#394250',
+    backgroundColor: '#0f141b',
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  uploadCopy: {
+    flex: 1,
+  },
+  uploadLabel: {
+    color: C.text,
+    fontWeight: '800',
+  },
+  uploadMeta: {
+    color: C.muted,
+    marginTop: 3,
+  },
+  analyseButton: {
+    minHeight: 46,
+    borderRadius: 8,
+    backgroundColor: C.button,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  disabledButton: {
+    opacity: 0.7,
+  },
+  historyCount: {
+    minWidth: 28,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: '#1F2740',
+    color: C.muted,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    fontWeight: '800',
+  },
+  emptyInline: {
+    color: C.muted,
+    textAlign: 'center',
+    paddingVertical: 24,
+  },
+  analysisCard: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: '#0f141b',
+    padding: 12,
+    gap: 9,
+  },
+  analysisTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  analysisScore: {
+    color: C.text,
+    fontWeight: '800',
+  },
+  analysisMeta: {
+    color: C.muted,
+    fontSize: 12,
+  },
+  analysisActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  outputButton: {
+    minHeight: 38,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#15506B',
+    backgroundColor: '#0f2f3e',
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outputButtonText: {
+    color: C.primary,
+    fontWeight: '800',
+  },
+  deleteButton: {
+    width: 38,
+    minHeight: 38,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#69343c',
+    backgroundColor: '#2a171d',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   settingLabel: {
     color: C.muted,
