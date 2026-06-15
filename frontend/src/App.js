@@ -1186,7 +1186,12 @@ function AthleteDetail({ athlete, onBack, onAnalysed, onDeleteAthlete }) {
             <h2>Analysis History <span>{busy ? '…' : analyses.length}</span></h2>
             {busy && (
               <div className="processing-state" role="status" aria-live="polite">
-                <div className="spinner" />
+                <dotlottie-wc
+                  src="/sports_loader.lottie"
+                  autoplay
+                  loop
+                  style={{ width: '180px', height: '180px' }}
+                />
                 <strong>Processing...</strong>
                 <span>Action in progress.</span>
               </div>
