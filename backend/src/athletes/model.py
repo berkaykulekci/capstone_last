@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Table
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -9,6 +9,14 @@ from ..database import Base
 
 def new_public_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12].upper()}"
+
+
+athlete_users = Table(
+    "athlete_users",
+    Base.metadata,
+    Column("athlete_id", String, ForeignKey("athletes.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class Athlete(Base):
@@ -22,6 +30,7 @@ class Athlete(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     analyses = relationship("Analysis", back_populates="athlete", cascade="all, delete-orphan")
+    doctors = relationship("User", secondary=athlete_users, backref="athletes")
 
 
 class Analysis(Base):

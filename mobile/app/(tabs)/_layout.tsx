@@ -1,6 +1,6 @@
 import { Tabs, Redirect } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, View, DeviceEventEmitter } from 'react-native';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -37,12 +37,25 @@ export default function TabLayout() {
           title: 'Home',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
         }}
+        listeners={({ navigation }) => {
+          let lastTap = 0;
+          return {
+            tabPress: (e) => {
+              const now = Date.now();
+              const DOUBLE_PRESS_DELAY = 350;
+              if (now - lastTap < DOUBLE_PRESS_DELAY) {
+                DeviceEventEmitter.emit('reset-home-screen');
+              }
+              lastTap = now;
+            },
+          };
+        }}
       />
       <Tabs.Screen
-        name="explore"
+        name="statistics"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: 'İstatistikler',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="chart.bar.fill" color={color} />,
         }}
       />
     </Tabs>

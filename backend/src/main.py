@@ -28,6 +28,36 @@ app = FastAPI(
 # Create database tables on startup
 Base.metadata.create_all(bind=engine)
 
+# Populate athlete_users association table for existing athletes who don't have it yet
+from sqlalchemy.orm import Session
+from .database import SessionLocal
+from .athletes.model import Athlete, athlete_users
+
+db: Session = SessionLocal()
+try:
+    athletes = db.query(Athlete).all()
+    for athlete in athletes:
+        exists = db.execute(
+            athlete_users.select().where(
+                (athlete_users.c.athlete_id == athlete.id) &
+                (athlete_users.c.user_id == athlete.user_id)
+            )
+        ).first()
+        if not exists:
+            db.execute(
+                athlete_users.insert().values(
+                    athlete_id=athlete.id,
+                    user_id=athlete.user_id
+                )
+            )
+    db.commit()
+except Exception as e:
+    import logging
+    logging.getLogger("uvicorn").error(f"Migration error: {e}")
+    db.rollback()
+finally:
+    db.close()
+
 # Allow the React dev server to call the API
 app.add_middleware(
     CORSMiddleware,

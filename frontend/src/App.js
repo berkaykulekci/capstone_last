@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import './App.css';
+import {
+  PieChart, Pie, Cell, Tooltip as RechartTooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  LineChart, Line,
+} from 'recharts';
 
 const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -186,6 +191,20 @@ function AuthScreen({ onAuth }) {
   );
 }
 
+function ConfirmModal({ message, onConfirm, onCancel }) {
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+        <p>{message}</p>
+        <div className="confirm-modal-actions">
+          <button className="secondary-button" onClick={onCancel}>İptal</button>
+          <button className="danger-button confirm-danger-btn" onClick={onConfirm}>Sil</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CreateAthleteModal({ onClose, onCreate }) {
   const [name, setName] = useState('');
   const [sport, setSport] = useState('');
@@ -225,14 +244,79 @@ function CreateAthleteModal({ onClose, onCreate }) {
   );
 }
 
-function Sidebar({ user, onDashboard, onSignOut }) {
+function JoinAthleteModal({ onClose, onJoin }) {
+  const [athleteId, setAthleteId] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!athleteId.trim()) return;
+    setError('');
+    setBusy(true);
+    try {
+      await onJoin(athleteId.trim());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="athlete-modal" onSubmit={submit} onClick={(e) => e.stopPropagation()}>
+        <h2>Join Athlete via Code</h2>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16 }}>
+          Enter the unique Athlete ID (e.g., ATH_...) shared by another doctor.
+        </p>
+        
+        <label htmlFor="join-athlete-id">Athlete Code / ID *</label>
+        <input
+          id="join-athlete-id"
+          placeholder="ATH_..."
+          value={athleteId}
+          onChange={(event) => setAthleteId(event.target.value)}
+          required
+          style={{ width: '100%', marginBottom: 12 }}
+          disabled={busy}
+          autoFocus
+        />
+
+        {error && <div className="error-banner" style={{ marginBottom: 16 }}>{error}</div>}
+
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" className="primary-button" disabled={busy}>
+            {busy ? 'Joining...' : 'Join'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function Sidebar({ user, onDashboard, onStatistics, onSignOut, activePage }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="brand-mark small">S</div>
-        <strong>SportsMD</strong>
+        <div className="brand-mark small">K</div>
+        <strong>Kinetic</strong>
       </div>
-      <button className="nav-item active" onClick={onDashboard}>Dashboard</button>
+      <button
+        className={`nav-item${activePage === 'dashboard' ? ' active' : ''}`}
+        onClick={onDashboard}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 17, verticalAlign: 'middle', marginRight: 8 }}>dashboard</span>
+        Dashboard
+      </button>
+      <button
+        className={`nav-item${activePage === 'statistics' ? ' active' : ''}`}
+        onClick={onStatistics}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 17, verticalAlign: 'middle', marginRight: 8 }}>bar_chart</span>
+        İstatistikler
+      </button>
       <div className="sidebar-user">
         <div className="avatar small-avatar">{initials(user?.email)}</div>
         <div>
@@ -245,7 +329,7 @@ function Sidebar({ user, onDashboard, onSignOut }) {
   );
 }
 
-function Dashboard({ athletes, onAdd, onSelect }) {
+function Dashboard({ athletes, onAdd, onSelect, onJoinCode }) {
   const stats = useMemo(() => {
     const high = athletes.filter((item) => item.latest_analysis?.risk === 'High').length;
     const moderate = athletes.filter((item) => item.latest_analysis?.risk === 'Moderate').length;
@@ -261,7 +345,7 @@ function Dashboard({ athletes, onAdd, onSelect }) {
           <p>{athletes.length} athletes assigned</p>
         </div>
         <div className="topbar-actions">
-          <button className="secondary-button">Join via Code</button>
+          <button className="secondary-button" onClick={onJoinCode}>Join via Code</button>
           <button className="primary-button" onClick={onAdd}>+ Add Athlete</button>
         </div>
       </header>
@@ -295,40 +379,146 @@ function Dashboard({ athletes, onAdd, onSelect }) {
   );
 }
 
-function UploadBox({ label, file, onChange }) {
+function VideoUploadCard({ label, file, onChange }) {
+  const [videoUrl, setVideoUrl] = useState(null);
+
+  useEffect(() => {
+    if (!file) { setVideoUrl(null); return; }
+    const url = URL.createObjectURL(file);
+    setVideoUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
   return (
-    <label className="upload-box">
-      <input type="file" accept="video/mp4,video/quicktime,video/x-msvideo,.mp4,.mov,.MOV,.avi" onChange={(event) => onChange(event.target.files?.[0] || null)} />
-      <span className="camera-icon">CAM</span>
-      <strong>{label}</strong>
-      <small>{file ? file.name : 'MP4, MOV, AVI'}</small>
-    </label>
+    <div className="video-upload-card">
+      <div className="video-card-header-row">
+        <h3 className="video-card-title">{label}</h3>
+        {file && (
+          <span className="material-symbols-outlined video-check-icon" style={{ fontSize: 16 }}>
+            check_circle
+          </span>
+        )}
+      </div>
+
+      {videoUrl ? (
+        /* ── File selected: full video player + compact replace strip ── */
+        <>
+          <div className="video-preview-area has-video">
+            <video
+              key={videoUrl}
+              src={videoUrl}
+              controls
+              className="video-preview-player"
+            />
+          </div>
+          <label className="video-replace-strip" htmlFor={`vup-${label}`}>
+            <input
+              id={`vup-${label}`}
+              type="file"
+              accept="video/mp4,video/quicktime,video/x-msvideo,.mp4,.mov,.MOV,.avi"
+              onChange={(e) => onChange(e.target.files?.[0] || null)}
+            />
+            <span className="material-symbols-outlined" style={{ fontSize: 15 }}>upload</span>
+            <span className="video-filename-inline">{file.name}</span>
+            <span className="upload-zone-browse-btn" style={{ marginLeft: 'auto' }}>REPLACE</span>
+          </label>
+        </>
+      ) : (
+        /* ── No file: large upload zone with placeholder ── */
+        <label className="video-upload-zone-inner empty" htmlFor={`vup-${label}`}>
+          <input
+            id={`vup-${label}`}
+            type="file"
+            accept="video/mp4,video/quicktime,video/x-msvideo,.mp4,.mov,.MOV,.avi"
+            onChange={(e) => onChange(e.target.files?.[0] || null)}
+          />
+          <span className="material-symbols-outlined upload-zone-icon-lg">videocam</span>
+          <span className="upload-zone-text">Drop a video or click to browse</span>
+          <span className="upload-zone-sub">MP4, MOV, AVI</span>
+          <span className="upload-zone-browse-btn" style={{ marginTop: 4 }}>BROWSE</span>
+        </label>
+      )}
+    </div>
   );
 }
 
-function ModelToggle({ value, onChange }) {
+
+const MODEL_OPTIONS = [
+  { id: 'mediapipe', label: 'MediaPipe', subLabel: 'Standard', note: 'Auto-detects test side via Z-coord. All 17 items exact. Max score: 19.', latency: '~25ms', precision: '95%' },
+  { id: 'yolo', label: 'YOLO Pose', subLabel: 'Fast Track', note: 'No heel/toe landmarks → M4, M9, M10 approximated. Max score: 19, approximate items flagged in CSV.', latency: '~12ms', precision: '92%' },
+  { id: 'rtm', label: 'RTMPose', subLabel: 'High Fidelity', note: 'Heel + toe landmarks present → all 17 items exact (M4/M9/M10 included). Max score: 19.', latency: '~45ms', precision: '98%' },
+];
+
+function EngineModelSelector({ selected, onChange }) {
+  function toggle(id) {
+    if (selected.includes(id)) {
+      if (selected.length === 1) return;
+      onChange(selected.filter((m) => m !== id));
+    } else {
+      onChange([...selected, id]);
+    }
+  }
   return (
-    <div className="model-toggle">
-      <span className="model-toggle-label">Pose Model</span>
-      <div className="model-toggle-buttons">
-        <button
-          type="button"
-          className={value === 'mediapipe' ? 'model-btn active' : 'model-btn'}
-          onClick={() => onChange('mediapipe')}
-        >
-          MediaPipe
-        </button>
-        <button
-          type="button"
-          className={value === 'yolo' ? 'model-btn active' : 'model-btn'}
-          onClick={() => onChange('yolo')}
-        >
-          YOLO
-        </button>
+    <div className="engine-model-selector">
+      <span className="engine-section-label">Estimation Model</span>
+      <div className="engine-model-list">
+        {MODEL_OPTIONS.map(({ id, label, subLabel, latency, precision }) => {
+          const isSelected = selected.includes(id);
+          return (
+            <label key={id} className={`engine-model-item${isSelected ? ' selected' : ''}`}>
+              <input type="checkbox" checked={isSelected} onChange={() => toggle(id)} />
+              <div className={`engine-model-indicator${isSelected ? ' selected' : ''}`}>
+                {isSelected && <div className="engine-model-dot" />}
+              </div>
+              <div className="engine-model-info">
+                <div className="engine-model-name">
+                  {label}
+                  <span className="engine-model-tag">{subLabel}</span>
+                </div>
+                <div className="engine-model-meta">Latency: {latency} | Precision: {precision}</div>
+              </div>
+            </label>
+          );
+        })}
       </div>
-      {value === 'yolo' && (
-        <p className="model-note">M4 (plantar fleksiyon), M9 (iç rot), M10 (dış rot) maddeleri toe/heel landmark olmadığından proxy yöntemle yaklaşık hesaplanır. Max skor: 19, yaklaşık maddeler CSV'de işaretlenir.</p>
+      {selected.length > 1 && (
+        <p className="engine-multi-note">Running {selected.length} models — results will be compared side-by-side.</p>
       )}
+    </div>
+  );
+}
+
+function AnalyseProgress({ onClick, busy }) {
+  return (
+    <div
+      className={`analyse-btn-wrap${busy ? ' is-analyzing' : ''}`}
+      onClick={!busy ? onClick : undefined}
+    >
+      <div className="analyse-btn-idle">
+        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>science</span>
+        INITIATE ANALYSIS
+      </div>
+      <div className="analyse-btn-progress">
+        <div className="analyse-progress-top">
+          <span>Analyzing Biometrics...</span>
+          <span>Processing</span>
+        </div>
+        <div className="analyse-progress-track-wrap">
+          <div className="analyse-stickman">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <circle cx="14" cy="4" r="3" />
+              <line x1="14" y1="7" x2="10" y2="14" />
+              <line className="sprint-arm-l" x1="14" y1="7" x2="8" y2="11" />
+              <line className="sprint-arm-r" x1="14" y1="7" x2="20" y2="11" />
+              <line className="sprint-leg-l" x1="10" y1="14" x2="6" y2="21" />
+              <line className="sprint-leg-r" x1="10" y1="14" x2="16" y2="21" />
+            </svg>
+          </div>
+          <div className="analyse-progress-bar">
+            <div className="analyse-progress-fill" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -336,7 +526,7 @@ function ModelToggle({ value, onChange }) {
 function TestSideSelect({ value, onChange }) {
   return (
     <div className="test-side-select">
-      <span className="model-toggle-label">Test Leg (YOLO)</span>
+      <span className="model-toggle-label">Test Leg</span>
       <div className="model-toggle-buttons">
         <button
           type="button"
@@ -353,21 +543,48 @@ function TestSideSelect({ value, onChange }) {
           Left
         </button>
       </div>
-      <p className="model-note">Which leg faces the side camera?</p>
+      <p className="model-note">Which leg faces the side camera? (required for YOLO / RTMPose)</p>
     </div>
   );
 }
 
+// Groups analyses submitted in the same minute into comparison batches.
+// Analyses arrive sorted newest-first; we reverse, group, then re-reverse.
+// Groups analyses submitted within 10 seconds of each other into comparison batches.
+// Uses actual timestamp diff instead of minute-key to avoid false grouping of
+// separate single-model runs that happen to fall within the same clock minute.
+function groupAnalyses(analyses) {
+  if (!analyses.length) return [];
+  const asc = [...analyses].reverse();
+  const groups = [];
+  let current = [asc[0]];
+  for (let i = 1; i < asc.length; i++) {
+    const diff = Math.abs(
+      new Date(asc[i].created_at).getTime() - new Date(current[0].created_at).getTime()
+    );
+    if (diff <= 10000) { // within 10 seconds → same batch
+      current.push(asc[i]);
+    } else {
+      groups.push(current);
+      current = [asc[i]];
+    }
+  }
+  groups.push(current);
+  return groups.reverse();
+}
+
 function ModelBadge({ model }) {
-  const isYolo = (model || '').toLowerCase() === 'yolo';
+  const m = (model || '').toLowerCase();
+  const label = m === 'yolo' ? 'YOLO' : m === 'rtm' ? 'RTMPose' : 'MediaPipe';
+  const colored = m === 'yolo' || m === 'rtm';
   return (
-    <span className={`pill ${isYolo ? 'blue' : ''}`} style={{ fontSize: 11 }}>
-      {isYolo ? 'YOLO' : 'MediaPipe'}
+    <span className={`pill ${colored ? 'blue' : ''}`} style={{ fontSize: 11 }}>
+      {label}
     </span>
   );
 }
 
-function AnalysisCard({ analysis, athleteName, onError, onDelete }) {
+function AnalysisCard({ analysis, athleteName, onError, onDelete, compact }) {
   const date = new Date(analysis.created_at).toLocaleString('tr-TR', {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
@@ -392,7 +609,7 @@ function AnalysisCard({ analysis, athleteName, onError, onDelete }) {
   }
 
   return (
-    <div className="analysis-card">
+    <div className={`analysis-card${compact ? ' compact' : ''}`}>
       <div className="analysis-card-header">
         <div className="analysis-card-meta">
           <ModelBadge model={analysis.pose_model} />
@@ -402,7 +619,7 @@ function AnalysisCard({ analysis, athleteName, onError, onDelete }) {
           </strong>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <small>{date}</small>
+          {!compact && <small>{date}</small>}
           {onDelete && (
             <button
               type="button"
@@ -435,13 +652,390 @@ function AnalysisCard({ analysis, athleteName, onError, onDelete }) {
   );
 }
 
-function AthleteDetail({ athlete, onBack, onAnalysed }) {
+/* ═══════════════════════════════════════════════════════════
+   STATISTICS PAGE
+   ═══════════════════════════════════════════════════════════ */
+const RISK_COLORS = { High: '#ef4444', Moderate: '#f5b51b', Low: '#37c563', 'No data': '#455264' };
+const MODEL_COLORS = { mediapipe: '#10b7df', yolo: '#a855f7', rtm: '#f97316' };
+
+function StatKpiCard({ icon, label, value, sub, accent }) {
+  return (
+    <div className="stats-kpi-card" style={{ borderLeftColor: accent || 'var(--cyan)' }}>
+      <span className="material-symbols-outlined stats-kpi-icon" style={{ color: accent || 'var(--cyan)' }}>{icon}</span>
+      <div className="stats-kpi-body">
+        <strong className="stats-kpi-value">{value}</strong>
+        <span className="stats-kpi-label">{label}</span>
+        {sub && <span className="stats-kpi-sub">{sub}</span>}
+      </div>
+    </div>
+  );
+}
+
+function CustomTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+  return (
+    <div className="recharts-custom-tooltip">
+      {label && <p className="recharts-tip-label">{label}</p>}
+      {payload.map((p, i) => (
+        <p key={i} style={{ color: p.color || p.fill, margin: '2px 0' }}>
+          {p.name}: <strong>{p.value}</strong>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function StatisticsPage({ token, athletes }) {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  async function downloadSingleCsv(csvUrl, athleteName) {
+    try {
+      const res = await fetch(apiUrl(csvUrl));
+      if (!res.ok) throw new Error('CSV could not be downloaded');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${athleteName.replace(/\s+/g, '_')}_latest_less.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function downloadCombinedCsv() {
+    try {
+      const res = await fetch(`${API_BASE}/athletes/statistics/csv`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Combined CSV could not be downloaded');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `tum_sporcular_analiz_raporu.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  useEffect(() => {
+    async function load() {
+      try {
+        setLoading(true);
+        const res = await fetch(`${API_BASE}/athletes/statistics`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Veriler yüklenemedi.');
+        const data = await res.json();
+        setStats(data);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [token]);
+
+  if (loading) {
+    return (
+      <main className="main-panel">
+        <div className="processing-state" style={{ minHeight: '60vh' }}>
+          <div className="spinner" />
+          <strong>İstatistikler yükleniyor...</strong>
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="main-panel">
+        <div className="error-banner" style={{ marginTop: 40 }}>{error}</div>
+      </main>
+    );
+  }
+
+  if (!stats) return null;
+
+  /* ── Derived chart data ── */
+  const riskData = Object.entries(stats.risk_distribution)
+    .filter(([, v]) => v > 0)
+    .map(([name, value]) => ({ name, value }));
+
+  const scoreDistData = Object.entries(stats.score_distribution).map(([name, value]) => ({ name, value }));
+
+  const modelData = Object.entries(stats.model_usage).map(([name, value]) => ({
+    name: name === 'mediapipe' ? 'MediaPipe' : name === 'yolo' ? 'YOLO' : 'RTMPose',
+    value,
+    key: name,
+  }));
+
+  // Group timeline by date, average score per date
+  const timelineMap = {};
+  for (const entry of stats.score_timeline) {
+    if (!timelineMap[entry.date]) timelineMap[entry.date] = [];
+    timelineMap[entry.date].push(entry.score);
+  }
+  const timelineData = Object.entries(timelineMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, scores]) => ({
+      date,
+      avg: Math.round((scores.reduce((s, v) => s + v, 0) / scores.length) * 10) / 10,
+      count: scores.length,
+    }));
+
+  const avgScore = stats.athlete_summaries.length
+    ? (stats.athlete_summaries.reduce((s, a) => s + (a.avg_score || 0), 0) / stats.athlete_summaries.filter(a => a.avg_score !== null).length)
+    : null;
+
+  const highRiskCount = stats.risk_distribution['High'] || 0;
+
+  return (
+    <main className="main-panel stats-page">
+      {/* Header */}
+      <header className="topbar" style={{ marginBottom: 28 }}>
+        <div>
+          <h1>İstatistikler</h1>
+          <p>Tüm sporcular için toplam analiz verileri</p>
+        </div>
+        <div className="topbar-actions">
+          <button className="primary-button" onClick={downloadCombinedCsv}>
+            <span className="material-symbols-outlined" style={{ fontSize: 18, verticalAlign: 'middle', marginRight: 6 }}>download</span>
+            Ortak CSV İndir
+          </button>
+        </div>
+      </header>
+
+      {/* KPI Row */}
+      <section className="stats-kpi-grid">
+        <StatKpiCard icon="group" label="Toplam Sporcu" value={stats.total_athletes} accent="var(--cyan)" />
+        <StatKpiCard icon="science" label="Toplam Analiz" value={stats.total_analyses} accent="#a855f7" />
+        <StatKpiCard
+          icon="monitor_heart"
+          label="Ort. Skor"
+          value={avgScore !== null && !isNaN(avgScore) ? avgScore.toFixed(1) : '—'}
+          sub="/ 19 puan"
+          accent="var(--green)"
+        />
+        <StatKpiCard icon="warning" label="Yüksek Risk" value={highRiskCount} accent="var(--red)" />
+      </section>
+
+      {/* Charts Row 1: Risk Donut + Score Distribution */}
+      <section className="stats-charts-row">
+        {/* Risk Donut */}
+        <div className="stats-chart-card">
+          <h3 className="stats-chart-title">Risk Dağılımı</h3>
+          {riskData.length === 0 ? (
+            <div className="empty-state" style={{ minHeight: 220 }}>Henüz analiz yok.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie
+                  data={riskData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={3}
+                  dataKey="value"
+                >
+                  {riskData.map((entry) => (
+                    <Cell key={entry.name} fill={RISK_COLORS[entry.name] || '#455264'} />
+                  ))}
+                </Pie>
+                <RechartTooltip content={<CustomTooltip />} />
+                <Legend
+                  formatter={(value) => <span style={{ color: 'var(--muted)', fontSize: 12 }}>{value}</span>}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Score Distribution Bar */}
+        <div className="stats-chart-card">
+          <h3 className="stats-chart-title">Skor Dağılımı</h3>
+          {stats.total_analyses === 0 ? (
+            <div className="empty-state" style={{ minHeight: 220 }}>Henüz analiz yok.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={scoreDistData} barCategoryGap="30%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#2b333f" vertical={false} />
+                <XAxis dataKey="name" tick={{ fill: 'var(--muted)', fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: 'var(--muted)', fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <RechartTooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(16,183,223,0.07)' }} />
+                <Bar dataKey="value" name="Analiz" radius={[4, 4, 0, 0]}>
+                  {scoreDistData.map((entry, i) => {
+                    const colors = ['#ef4444', '#f5b51b', '#10b7df', '#37c563'];
+                    return <Cell key={i} fill={colors[i % colors.length]} />;
+                  })}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Model Usage */}
+        <div className="stats-chart-card">
+          <h3 className="stats-chart-title">Model Kullanımı</h3>
+          {modelData.length === 0 ? (
+            <div className="empty-state" style={{ minHeight: 220 }}>Henüz analiz yok.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={modelData} layout="vertical" barCategoryGap="25%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#2b333f" horizontal={false} />
+                <XAxis type="number" tick={{ fill: 'var(--muted)', fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: 'var(--muted)', fontSize: 12 }} axisLine={false} tickLine={false} width={72} />
+                <RechartTooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(16,183,223,0.07)' }} />
+                <Bar dataKey="value" name="Analiz" radius={[0, 4, 4, 0]}>
+                  {modelData.map((entry) => (
+                    <Cell key={entry.key} fill={MODEL_COLORS[entry.key] || '#10b7df'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </section>
+
+      {/* Score Timeline */}
+      {timelineData.length > 0 && (
+        <section className="stats-chart-card stats-chart-wide">
+          <h3 className="stats-chart-title">Zaman İçinde Ortalama Skor</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={timelineData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2b333f" />
+              <XAxis dataKey="date" tick={{ fill: 'var(--muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis domain={[0, 19]} tick={{ fill: 'var(--muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <RechartTooltip content={<CustomTooltip />} />
+              <Line
+                type="monotone"
+                dataKey="avg"
+                name="Ort. Skor"
+                stroke="var(--cyan)"
+                strokeWidth={2.5}
+                dot={{ fill: 'var(--cyan)', r: 4, strokeWidth: 0 }}
+                activeDot={{ r: 6, fill: 'var(--cyan)' }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </section>
+      )}
+
+      {/* Sport Breakdown Table */}
+      {stats.sport_summary.length > 0 && (
+        <section className="stats-table-card">
+          <h3 className="stats-chart-title">Spora Göre Dağılım</h3>
+          <div className="stats-table-wrap">
+            <table className="stats-table">
+              <thead>
+                <tr>
+                  <th>Spor</th>
+                  <th>Analiz</th>
+                  <th>Ort. Skor</th>
+                  <th>Yüksek Risk</th>
+                  <th>Orta Risk</th>
+                  <th>Düşük Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.sport_summary.map((row) => (
+                  <tr key={row.sport}>
+                    <td><strong>{row.sport}</strong></td>
+                    <td>{row.analyses}</td>
+                    <td>{row.avg_score !== null ? row.avg_score : '—'}</td>
+                    <td><span className="pill risk-high" style={{ fontSize: 11 }}>{row.high}</span></td>
+                    <td><span className="pill risk-moderate" style={{ fontSize: 11 }}>{row.moderate}</span></td>
+                    <td><span className="pill risk-low" style={{ fontSize: 11 }}>{row.low}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* Athlete Summary Table */}
+      {stats.athlete_summaries.length > 0 && (
+        <section className="stats-table-card">
+          <h3 className="stats-chart-title">Sporcu Özeti</h3>
+          <div className="stats-table-wrap">
+            <table className="stats-table">
+              <thead>
+                <tr>
+                  <th>Sporcu</th>
+                  <th>Spor / Takım</th>
+                  <th>Analizler</th>
+                  <th>Ort. Skor</th>
+                  <th>Son Skor</th>
+                  <th>Son Risk</th>
+                  <th>Son Model</th>
+                  <th>Rapor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.athlete_summaries.map((a) => (
+                  <tr key={a.id}>
+                    <td><strong>{a.name}</strong></td>
+                    <td style={{ color: 'var(--muted)', fontSize: 12 }}>{a.sport || '—'} {a.team ? `· ${a.team}` : ''}</td>
+                    <td>{a.total_analyses}</td>
+                    <td>{a.avg_score !== null ? a.avg_score : '—'}</td>
+                    <td>{a.latest_score !== null && a.latest_score !== undefined ? a.latest_score : '—'}</td>
+                    <td>
+                      {a.latest_risk ? (
+                        <span className={`pill ${riskClass(a.latest_risk)}`} style={{ fontSize: 11 }}>{a.latest_risk}</span>
+                      ) : <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>}
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      {a.latest_model ? (a.latest_model === 'yolo' ? 'YOLO' : a.latest_model === 'rtm' ? 'RTMPose' : 'MediaPipe') : '—'}
+                    </td>
+                    <td>
+                      {a.latest_csv_url ? (
+                        <button
+                          type="button"
+                          className="table-action-btn"
+                          onClick={() => downloadSingleCsv(a.latest_csv_url, a.name)}
+                          title="Son Analiz CSV Raporunu İndir"
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span>
+                        </button>
+                      ) : (
+                        <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </main>
+  );
+}
+
+function AthleteDetail({ athlete, onBack, onAnalysed, onDeleteAthlete }) {
   const [sideFile, setSideFile] = useState(null);
   const [frontFile, setFrontFile] = useState(null);
-  const [poseModel, setPoseModel] = useState('mediapipe');
+  const [poseModels, setPoseModels] = useState(['mediapipe']);
   const [testSide, setTestSide] = useState('right');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [confirmAnalysisId, setConfirmAnalysisId] = useState(null);
+  const [confirmDeleteAthlete, setConfirmDeleteAthlete] = useState(false);
+
+  const needsTestSide = poseModels.some((m) => m === 'yolo' || m === 'rtm');
 
   async function analyse() {
     if (!sideFile || !frontFile) {
@@ -453,7 +1047,7 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
     const form = new FormData();
     form.append('side_video', sideFile);
     form.append('front_video', frontFile);
-    form.append('pose_model', poseModel);
+    form.append('pose_models', poseModels.join(','));
     form.append('test_side', testSide);
 
     try {
@@ -473,10 +1067,8 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
     }
   }
 
-  async function deleteAnalysis(analysisId) {
-    if (!window.confirm("Bu analizi silmek istediğinizden emin misiniz?")) {
-      return;
-    }
+  async function doDeleteAnalysis(analysisId) {
+    setConfirmAnalysisId(null);
     setBusy(true);
     setError('');
     try {
@@ -497,11 +1089,46 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
     }
   }
 
+  async function doDeleteAthlete() {
+    setConfirmDeleteAthlete(false);
+    setBusy(true);
+    setError('');
+    try {
+      const token = localStorage.getItem('sportsmd_token');
+      const res = await fetch(`${API_BASE}/athletes/${athlete.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.detail || 'Athlete deletion failed');
+      }
+      onDeleteAthlete();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
   const analyses = athlete.analyses || [];
   const latest = athlete.latest_analysis;
 
   return (
     <main className="detail-layout">
+      {confirmAnalysisId && (
+        <ConfirmModal
+          message="Bu analizi silmek istediğinizden emin misiniz?"
+          onConfirm={() => doDeleteAnalysis(confirmAnalysisId)}
+          onCancel={() => setConfirmAnalysisId(null)}
+        />
+      )}
+      {confirmDeleteAthlete && (
+        <ConfirmModal
+          message={`"${athlete.name}" sporcusunu ve tüm analizlerini silmek istediğinizden emin misiniz?`}
+          onConfirm={doDeleteAthlete}
+          onCancel={() => setConfirmDeleteAthlete(false)}
+        />
+      )}
       <button className="back-button" onClick={onBack}>Back</button>
       <div className="detail-grid">
         <aside className="profile-column">
@@ -514,6 +1141,13 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
               <span>Athlete ID</span>
               <strong>{athlete.id}</strong>
             </div>
+            <button
+              className="danger-button"
+              onClick={() => setConfirmDeleteAthlete(true)}
+              disabled={busy}
+            >
+              Sporcuyu Sil
+            </button>
           </section>
           <section className="info-card">
             <div><span>Latest Score</span><strong>{latest?.total_score ?? '-'}</strong></div>
@@ -522,27 +1156,42 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
         </aside>
 
         <section className="detail-main">
-          <div className="upload-panel">
-            <h2>Upload Video</h2>
-            <div className="upload-grid">
-              <UploadBox label="Side view (sagittal)" file={sideFile} onChange={setSideFile} />
-              <UploadBox label="Front view (frontal)" file={frontFile} onChange={setFrontFile} />
+          <div className="upload-engine-row">
+            <div className="video-upload-section">
+              <div className="video-section-header">
+                <h2>Diagnostic Upload</h2>
+                <p>Synchronized dual-angle motion capture analysis.</p>
+              </div>
+              <div className="video-cards-grid">
+                <VideoUploadCard label="Front View" file={frontFile} onChange={setFrontFile} />
+                <VideoUploadCard label="Side View" file={sideFile} onChange={setSideFile} />
+              </div>
             </div>
-            <ModelToggle value={poseModel} onChange={setPoseModel} />
-            {poseModel === 'yolo' && <TestSideSelect value={testSide} onChange={setTestSide} />}
-            <div className="upload-actions-row">
-              <button className="primary-button" onClick={analyse} disabled={busy}>
-                {busy ? 'Analysing...' : 'Upload & Analyse'}
-              </button>
+            <div className="engine-config-panel">
+              <div className="engine-panel-header">
+                <span className="material-symbols-outlined engine-panel-icon">memory</span>
+                <h2 className="engine-panel-title">Engine Configuration</h2>
+              </div>
+              <EngineModelSelector selected={poseModels} onChange={setPoseModels} />
+              {needsTestSide && <TestSideSelect value={testSide} onChange={setTestSide} />}
+              <AnalyseProgress onClick={analyse} busy={busy} />
+              <p className="engine-status-text">
+                {busy ? 'Analysis in progress...' : 'Ready to analyze media.'}
+              </p>
+              {error && <div className="error-banner">{error}</div>}
             </div>
-            {error && <div className="error-banner">{error}</div>}
           </div>
 
           <div className="outputs-panel">
             <h2>Analysis History <span>{busy ? '…' : analyses.length}</span></h2>
             {busy && (
               <div className="processing-state" role="status" aria-live="polite">
-                <div className="spinner" />
+                <dotlottie-wc
+                  src="/sports_loader.lottie"
+                  autoplay
+                  loop
+                  style={{ width: '180px', height: '180px' }}
+                />
                 <strong>Processing...</strong>
                 <span>Action in progress.</span>
               </div>
@@ -550,15 +1199,33 @@ function AthleteDetail({ athlete, onBack, onAnalysed }) {
             {!busy && analyses.length === 0 && (
               <div className="empty-state">No analyses yet.</div>
             )}
-            {!busy && analyses.map((a) => (
-              <AnalysisCard
-                key={a.id}
-                analysis={a}
-                athleteName={athlete.name}
-                onError={setError}
-                onDelete={deleteAnalysis}
-              />
-            ))}
+            {!busy && groupAnalyses(analyses).map((group, i) =>
+              group.length === 1 ? (
+                <AnalysisCard
+                  key={group[0].id}
+                  analysis={group[0]}
+                  athleteName={athlete.name}
+                  onError={setError}
+                  onDelete={(id) => setConfirmAnalysisId(id)}
+                />
+              ) : (
+                <div key={i} className="analysis-comparison-group">
+                  <div className="comparison-group-label">Comparison run · {new Date(group[0].created_at).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</div>
+                  <div className="comparison-group-grid">
+                    {group.map((a) => (
+                      <AnalysisCard
+                        key={a.id}
+                        analysis={a}
+                        athleteName={athlete.name}
+                        onError={setError}
+                        onDelete={(id) => setConfirmAnalysisId(id)}
+                        compact
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
+            )}
           </div>
         </section>
       </div>
@@ -572,6 +1239,8 @@ function App() {
   const [athletes, setAthletes] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [page, setPage] = useState('dashboard'); // 'dashboard' | 'statistics'
 
   async function request(path, options = {}) {
     const res = await fetch(`${API_BASE}${path}`, {
@@ -628,17 +1297,47 @@ function App() {
     setSelected(athlete);
   }
 
+  async function joinAthlete(athleteId) {
+    const athlete = await request('/athletes/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ athlete_id: athleteId }),
+    });
+    setShowJoinModal(false);
+    await loadData();
+    setSelected(athlete);
+  }
+
   if (!token) return <AuthScreen onAuth={handleAuth} />;
 
   return (
     <div className="app-shell">
-      {!selected && <Sidebar user={user} onDashboard={() => setSelected(null)} onSignOut={signOut} />}
+      <Sidebar
+        user={user}
+        onDashboard={() => { setSelected(null); setPage('dashboard'); }}
+        onStatistics={() => { setSelected(null); setPage('statistics'); }}
+        onSignOut={signOut}
+        activePage={selected ? 'dashboard' : page}
+      />
       {selected ? (
-        <AthleteDetail athlete={selected} onBack={() => setSelected(null)} onAnalysed={loadData} />
+        <AthleteDetail
+          athlete={selected}
+          onBack={() => setSelected(null)}
+          onAnalysed={loadData}
+          onDeleteAthlete={() => { setSelected(null); loadData(); }}
+        />
+      ) : page === 'statistics' ? (
+        <StatisticsPage token={token} athletes={athletes} />
       ) : (
-        <Dashboard athletes={athletes} onAdd={() => setShowModal(true)} onSelect={setSelected} />
+        <Dashboard
+          athletes={athletes}
+          onAdd={() => setShowModal(true)}
+          onJoinCode={() => setShowJoinModal(true)}
+          onSelect={(a) => { setSelected(a); setPage('dashboard'); }}
+        />
       )}
       {showModal && <CreateAthleteModal onClose={() => setShowModal(false)} onCreate={createAthlete} />}
+      {showJoinModal && <JoinAthleteModal onClose={() => setShowJoinModal(false)} onJoin={joinAthlete} />}
     </div>
   );
 }

@@ -5,19 +5,19 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
-  Platform,
   KeyboardAvoidingView,
+  Platform,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { Link, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import LottieView from 'lottie-react-native';
 import { useAuth } from '@/contexts/auth-context';
 
 const C = {
-  headerBg: '#0D2137',
-  bg: '#0D1117',
+  bg: '#0D2137',
   surface: '#161B22',
   border: '#30363D',
   borderFocused: '#1AA8CE',
@@ -27,25 +27,17 @@ const C = {
   muted: '#8B949E',
 };
 
-type FocusedField = 'email' | 'password' | 'confirm' | null;
-
 export default function SignupScreen() {
   const { register } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [focusedField, setFocusedField] = useState<FocusedField>(null);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   async function handleSignup() {
-    if (!email.trim() || !password.trim() || !confirmPassword.trim()) {
+    if (!email.trim() || !password.trim()) {
       Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
-    if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
       return;
     }
     if (password.length < 6) {
@@ -68,179 +60,122 @@ export default function SignupScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        {/* ── Header block ── */}
-        <View style={styles.header}>
-          {/* Decorative circles inside header */}
-          <View style={styles.headerCircleTopRight} />
-          <View style={styles.headerCircleBottomLeft} />
+        {/* Decorative glow orbs */}
+        <View style={styles.orbOuter} />
+        <View style={styles.orbInner} />
 
-          <View style={styles.iconBadge}>
-            <Ionicons name="person-add" size={30} color="#fff" />
-          </View>
-          <Text style={styles.headerTitle}>Create Account</Text>
-          <Text style={styles.headerSubtitle}>Join us today</Text>
+        {/* Lottie running animation badge */}
+        <View style={styles.brandArea}>
+          <LottieView
+            source={require('../assets/running-animation.lottie')}
+            autoPlay
+            loop
+            style={styles.lottieLogo}
+          />
         </View>
 
-        {/* ── Overlapping card ── */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Your details</Text>
-          <Text style={styles.cardSubtitle}>Fill in the form to get started</Text>
+        <Text style={styles.title}>Create Account</Text>
+        <Text style={styles.subtitle}>Sign up to continue</Text>
 
-          <View style={styles.form}>
-            {/* Email */}
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Email address</Text>
-              <View
-                style={[
-                  styles.inputWrapper,
-                  focusedField === 'email' && styles.inputWrapperFocused,
-                ]}
-              >
-                <Ionicons
-                  name="mail-outline"
-                  size={18}
-                  color={focusedField === 'email' ? C.primaryLight : C.muted}
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="you@example.com"
-                  placeholderTextColor={C.muted}
-                  value={email}
-                  onChangeText={setEmail}
-                  onFocus={() => setFocusedField('email')}
-                  onBlur={() => setFocusedField(null)}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  textContentType="emailAddress"
-                  autoComplete="email"
-                />
-              </View>
-            </View>
+        <View style={styles.form}>
+          {/* Email */}
+          <View
+            style={[
+              styles.inputWrapper,
+              focusedField === 'email' && styles.inputWrapperFocused,
+            ]}
+          >
+            <Ionicons
+              name="mail-outline"
+              size={20}
+              color={focusedField === 'email' ? C.primaryLight : C.muted}
+              style={styles.inputIcon}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Email address"
+              placeholderTextColor={C.muted}
+              value={email}
+              onChangeText={setEmail}
+              onFocus={() => setFocusedField('email')}
+              onBlur={() => setFocusedField(null)}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              autoComplete="email"
+            />
+          </View>
 
-            {/* Password */}
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Password</Text>
-              <View
-                style={[
-                  styles.inputWrapper,
-                  focusedField === 'password' && styles.inputWrapperFocused,
-                ]}
-              >
-                <Ionicons
-                  name="lock-closed-outline"
-                  size={18}
-                  color={focusedField === 'password' ? C.primaryLight : C.muted}
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={[styles.input, styles.inputFlex]}
-                  placeholder="At least 6 characters"
-                  placeholderTextColor={C.muted}
-                  value={password}
-                  onChangeText={setPassword}
-                  onFocus={() => setFocusedField('password')}
-                  onBlur={() => setFocusedField(null)}
-                  secureTextEntry={!showPassword}
-                  textContentType="newPassword"
-                  autoComplete="new-password"
-                />
-                <TouchableOpacity
-                  onPress={() => setShowPassword((v) => !v)}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  <Ionicons
-                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                    size={18}
-                    color={C.muted}
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Confirm password */}
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Confirm password</Text>
-              <View
-                style={[
-                  styles.inputWrapper,
-                  focusedField === 'confirm' && styles.inputWrapperFocused,
-                ]}
-              >
-                <Ionicons
-                  name="shield-checkmark-outline"
-                  size={18}
-                  color={focusedField === 'confirm' ? C.primaryLight : C.muted}
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={[styles.input, styles.inputFlex]}
-                  placeholder="Repeat your password"
-                  placeholderTextColor={C.muted}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  onFocus={() => setFocusedField('confirm')}
-                  onBlur={() => setFocusedField(null)}
-                  secureTextEntry={!showConfirm}
-                  textContentType="newPassword"
-                  autoComplete="new-password"
-                />
-                <TouchableOpacity
-                  onPress={() => setShowConfirm((v) => !v)}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  accessibilityLabel={showConfirm ? 'Hide confirm password' : 'Show confirm password'}
-                >
-                  <Ionicons
-                    name={showConfirm ? 'eye-off-outline' : 'eye-outline'}
-                    size={18}
-                    color={C.muted}
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* CTA */}
+          {/* Password */}
+          <View
+            style={[
+              styles.inputWrapper,
+              focusedField === 'password' && styles.inputWrapperFocused,
+            ]}
+          >
+            <Ionicons
+              name="lock-closed-outline"
+              size={20}
+              color={focusedField === 'password' ? C.primaryLight : C.muted}
+              style={styles.inputIcon}
+            />
+            <TextInput
+              style={[styles.input, styles.inputFlex]}
+              placeholder="Password"
+              placeholderTextColor={C.muted}
+              value={password}
+              onChangeText={setPassword}
+              onFocus={() => setFocusedField('password')}
+              onBlur={() => setFocusedField(null)}
+              secureTextEntry={!showPassword}
+              textContentType="password"
+              autoComplete="password"
+            />
             <TouchableOpacity
-              style={[styles.button, loading && styles.buttonDisabled]}
-              onPress={handleSignup}
-              disabled={loading}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Create Account"
+              onPress={() => setShowPassword((v) => !v)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
             >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <View style={styles.buttonInner}>
-                  <Ionicons
-                    name="person-add-outline"
-                    size={18}
-                    color="#fff"
-                    style={styles.buttonIcon}
-                  />
-                  <Text style={styles.buttonText}>Create Account</Text>
-                </View>
-              )}
+              <Ionicons
+                name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                size={20}
+                color={C.muted}
+              />
             </TouchableOpacity>
           </View>
 
-          {/* Footer */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Already have an account? </Text>
-            <Link href="/login" asChild>
-              <TouchableOpacity accessibilityRole="link">
-                <Text style={styles.link}>Sign In</Text>
-              </TouchableOpacity>
-            </Link>
-          </View>
+          {/* Sign Up button */}
+          <TouchableOpacity
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={handleSignup}
+            disabled={loading}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Sign Up"
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Sign Up</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Already have an account? </Text>
+          <Link href="/login" asChild>
+            <TouchableOpacity accessibilityRole="link">
+              <Text style={styles.link}>Sign In</Text>
+            </TouchableOpacity>
+          </Link>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -254,111 +189,69 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 40,
-  },
-  // ── Header ──
-  header: {
-    backgroundColor: C.headerBg,
-    height: 272,
-    borderBottomLeftRadius: 40,
-    borderBottomRightRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: 52,
-    overflow: 'hidden',
-  },
-  headerCircleTopRight: {
-    position: 'absolute',
-    top: -80,
-    right: -60,
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: 'rgba(10, 126, 164, 0.18)',
-  },
-  headerCircleBottomLeft: {
-    position: 'absolute',
-    bottom: -40,
-    left: -50,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(26, 168, 206, 0.09)',
-  },
-  iconBadge: {
-    width: 66,
-    height: 66,
-    borderRadius: 20,
-    backgroundColor: C.primary,
-    alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
-    shadowColor: C.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 60,
   },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 4,
+  // Decorative orbs (absolute, centered at top)
+  orbOuter: {
+    position: 'absolute',
+    top: -140,
+    alignSelf: 'center',
+    width: 420,
+    height: 420,
+    borderRadius: 210,
+    backgroundColor: 'rgba(10, 126, 164, 0.06)',
   },
-  headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.50)',
+  orbInner: {
+    position: 'absolute',
+    top: -70,
+    alignSelf: 'center',
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: 'rgba(10, 126, 164, 0.11)',
   },
-  // ── Card ──
-  card: {
-    marginTop: -20,
-    marginHorizontal: 20,
-    backgroundColor: C.surface,
-    borderRadius: 24,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.28,
-    shadowRadius: 24,
-    elevation: 12,
+  // Brand
+  brandArea: {
+    alignItems: 'center',
+    marginBottom: 28,
   },
-  cardTitle: {
-    fontSize: 20,
+  lottieLogo: {
+    width: 130,
+    height: 130,
+  },
+  // Heading
+  title: {
+    fontSize: 30,
     fontWeight: '700',
     color: C.text,
-    marginBottom: 2,
+    textAlign: 'center',
+    marginBottom: 6,
   },
-  cardSubtitle: {
-    fontSize: 13,
+  subtitle: {
+    fontSize: 15,
     color: C.muted,
-    marginBottom: 24,
+    textAlign: 'center',
+    marginBottom: 36,
   },
-  // ── Form ──
+  // Form
   form: {
-    gap: 16,
-  },
-  fieldGroup: {
-    gap: 6,
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: C.muted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
+    gap: 14,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.bg,
-    borderRadius: 12,
+    backgroundColor: C.surface,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.border,
     paddingHorizontal: 14,
-    height: 50,
+    height: 54,
   },
   inputWrapperFocused: {
     borderColor: C.borderFocused,
+    backgroundColor: '#1A2332',
   },
   inputIcon: {
     marginRight: 10,
@@ -371,11 +264,19 @@ const styles = StyleSheet.create({
   inputFlex: {
     flex: 1,
   },
-  // ── Button ──
+  forgotContainer: {
+    alignSelf: 'flex-end',
+    marginTop: -2,
+  },
+  forgotText: {
+    color: C.primaryLight,
+    fontSize: 13,
+    fontWeight: '500',
+  },
   button: {
     backgroundColor: C.primary,
-    borderRadius: 12,
-    height: 52,
+    borderRadius: 14,
+    height: 54,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 4,
@@ -383,28 +284,18 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
   },
-  buttonInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  buttonIcon: {
-    marginRight: 8,
-  },
   buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.3,
   },
-  // ── Footer ──
+  // Footer
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 20,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: C.border,
+    marginTop: 32,
   },
   footerText: {
     color: C.muted,

@@ -35,7 +35,7 @@ sys.path.insert(0, _BENCHMARK_DIR)
 
 import mediapipe as mp
 
-from limb_utils import MP_KP_MAP, YOLO_KP_MAP
+from limb_utils import MP_KP_MAP, YOLO_KP_MAP, RTM_KP_MAP
 from metrics import (
     compute_fps_and_latency,
     compute_missing_kp_rate,
@@ -257,6 +257,92 @@ def _run_yolo_inference(
     return poses_raw, poses_interp, conf, frame_times_ms, width, height, video_fps
 
 
+# ── RTMPose inference (per-frame timing) ────────────────────────────────────
+
+def _run_rtm_inference(
+    video_path: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[float], int, int, float]:
+    """
+    RTMPose-WholeBody inference via rtmlib (ONNX Runtime backend).
+    Returns poses normalized to [0,1] with Y inverted.
+
+    Returns
+    -------
+    poses_raw, poses_interp, conf_array, frame_times_ms, width, height, video_fps
+    """
+    try:
+        from rtmlib import Wholebody
+    except ImportError:
+        raise ImportError(
+            'rtmlib paketi bulunamadı. '
+            'Yüklemek için: pip install rtmlib'
+        )
+
+    cap = cv2.VideoCapture(video_path)
+    width     = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height    = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    video_fps = cap.get(cv2.CAP_PROP_FPS)
+    if video_fps <= 0 or np.isnan(video_fps):
+        video_fps = 30.0
+
+    model = Wholebody(mode='performance', backend='onnxruntime', device='cpu')
+
+    all_poses_raw: List[np.ndarray] = []
+    all_conf:      List[np.ndarray] = []
+    frame_times_ms: List[float]     = []
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        t0 = time.perf_counter()
+        keypoints, scores = model(frame)
+        t1 = time.perf_counter()
+        frame_times_ms.append((t1 - t0) * 1000.0)
+
+        # keypoints: (17, 2) — x,y normalize [0,1]; scores: (17,)
+        # Slice to 17 COCO joints (RTM outputs 133 kpts, we use the COCO subset)
+        lm_array = np.full((17, 3), np.nan)
+        conf_row = np.full(17, np.nan)
+
+        if keypoints is not None and len(keypoints) >= 17:
+            for i in range(17):
+                x_norm = float(keypoints[i, 0])
+                y_norm = float(keypoints[i, 1])
+                conf = float(scores[i]) if i < len(scores) else 0.0
+
+                if not np.isnan(x_norm) and not np.isnan(y_norm) and conf > 0:
+                    lm_array[i] = [
+                        np.clip(x_norm, 0.0, 1.0),
+                        np.clip(1.0 - y_norm, 0.0, 1.0),  # Y invert
+                        conf,
+                    ]
+                    conf_row[i] = conf
+
+        all_poses_raw.append(lm_array)
+        all_conf.append(conf_row)
+
+    cap.release()
+
+    if not all_poses_raw:
+        empty_raw  = np.empty((0, 17, 3), dtype=np.float64)
+        empty_conf = np.empty((0, 17),    dtype=np.float64)
+        return empty_raw, empty_raw.copy(), empty_conf, [], width, height, video_fps
+
+    poses_raw = np.array(all_poses_raw)   # (N, 17, 3)
+    conf      = np.array(all_conf)        # (N, 17)
+
+    # Linear interpolasyon
+    poses_interp = poses_raw.copy()
+    for kp_idx in range(17):
+        for c in range(2):
+            s = pd.Series(poses_interp[:, kp_idx, c])
+            poses_interp[:, kp_idx, c] = s.interpolate(limit_direction='both').to_numpy()
+
+    return poses_raw, poses_interp, conf, frame_times_ms, width, height, video_fps
+
+
 # ── OurModel inference ────────────────────────────────────────────────────────
 
 def _run_our_model_inference(
@@ -377,6 +463,7 @@ def run_benchmark(
     output_dir: str,
     yolo_model: str = 'yolov8x-pose.pt',
     skip_yolo: bool = False,
+    skip_rtm: bool = False,
     skip_ourmodel: bool = False,
 ) -> None:
     videos = find_videos(video_dir)
@@ -421,7 +508,7 @@ def run_benchmark(
 
         # ── YOLO ──────────────────────────────────────────────────────────
         if not skip_yolo:
-            print(f'  [2/3] YOLO Pose ({yolo_model})...')
+            print(f'  [2/4] YOLO Pose ({yolo_model})...')
             try:
                 poses_raw, poses_i, conf, times, w, h, vfps = \
                     _run_yolo_inference(video_path, yolo_model_name=yolo_model)
@@ -439,11 +526,33 @@ def run_benchmark(
             except Exception as e:
                 print(f'     [HATA] YOLO başarısız: {e}')
         else:
-            print('  [2/3] YOLO: --skip-yolo ile atlandı.')
+            print('  [2/4] YOLO: --skip-yolo ile atlandı.')
+
+        # ── RTMPose ───────────────────────────────────────────────────────
+        if not skip_rtm:
+            print('  [3/4] RTMPose-WholeBody (ONNX Runtime)...')
+            try:
+                poses_raw, poses_i, conf, times, w, h, vfps = \
+                    _run_rtm_inference(video_path)
+                summary, rows = _build_results(
+                    video_name, 'RTMPose', poses_raw, poses_i, conf, times, RTM_KP_MAP
+                )
+                all_summary.append(summary)
+                all_frame_rows.extend(rows)
+                print(f'     → {summary.get("total_frames", 0)} frame | '
+                      f'FPS={summary.get("fps", 0):.1f} | '
+                      f'Latency={summary.get("latency_ms", 0):.1f} ms | '
+                      f'Missing={summary.get("missing_kp_pct", 0):.2f}%')
+            except ImportError as e:
+                print(f'     [ATLA] rtmlib yüklü değil: {e}')
+            except Exception as e:
+                print(f'     [HATA] RTMPose başarısız: {e}')
+        else:
+            print('  [3/4] RTMPose: --skip-rtm ile atlandı.')
 
         # ── OurModel ──────────────────────────────────────────────────────
         if not skip_ourmodel:
-            print('  [3/3] OurModel (MediaPipe + jump_detector)...')
+            print('  [4/4] OurModel (MediaPipe + jump_detector)...')
             try:
                 poses_raw, poses_i, conf, times, w, h, vfps = \
                     _run_our_model_inference(video_path)
@@ -459,7 +568,7 @@ def run_benchmark(
             except Exception as e:
                 print(f'     [HATA] OurModel başarısız: {e}')
         else:
-            print('  [3/3] OurModel: --skip-ourmodel ile atlandı.')
+            print('  [4/4] OurModel: --skip-ourmodel ile atlandı.')
 
     # ── CSV çıktıları ──────────────────────────────────────────────────────
     print(f'\n{"="*60}')
@@ -493,7 +602,7 @@ def run_benchmark(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description='Pose Estimation Benchmark — MediaPipe vs YOLO vs OurModel'
+        description='Pose Estimation Benchmark — MediaPipe vs YOLO vs RTMPose vs OurModel'
     )
     parser.add_argument(
         '--videos', '-v',
@@ -516,6 +625,11 @@ def _parse_args() -> argparse.Namespace:
         help='YOLO modelini atla',
     )
     parser.add_argument(
+        '--skip-rtm',
+        action='store_true',
+        help='RTMPose modelini atla',
+    )
+    parser.add_argument(
         '--skip-ourmodel',
         action='store_true',
         help='OurModel pipeline\'ını atla',
@@ -533,5 +647,6 @@ if __name__ == '__main__':
         output_dir=output_dir,
         yolo_model=args.yolo_model,
         skip_yolo=args.skip_yolo,
+        skip_rtm=args.skip_rtm,
         skip_ourmodel=args.skip_ourmodel,
     )

@@ -35,5 +35,9 @@ class AthleteResponse(BaseModel):
     analyses: list[AnalysisSummary] = []
 
 
+class AthleteJoin(BaseModel):
+    athlete_id: str
+
+
 class AnalysisResponse(AnalysisSummary):
     athlete_id: str
