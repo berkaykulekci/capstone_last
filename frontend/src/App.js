@@ -244,6 +244,58 @@ function CreateAthleteModal({ onClose, onCreate }) {
   );
 }
 
+function JoinAthleteModal({ onClose, onJoin }) {
+  const [athleteId, setAthleteId] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!athleteId.trim()) return;
+    setError('');
+    setBusy(true);
+    try {
+      await onJoin(athleteId.trim());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="athlete-modal" onSubmit={submit} onClick={(e) => e.stopPropagation()}>
+        <h2>Join Athlete via Code</h2>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16 }}>
+          Enter the unique Athlete ID (e.g., ATH_...) shared by another doctor.
+        </p>
+        
+        <label htmlFor="join-athlete-id">Athlete Code / ID *</label>
+        <input
+          id="join-athlete-id"
+          placeholder="ATH_..."
+          value={athleteId}
+          onChange={(event) => setAthleteId(event.target.value)}
+          required
+          style={{ width: '100%', marginBottom: 12 }}
+          disabled={busy}
+          autoFocus
+        />
+
+        {error && <div className="error-banner" style={{ marginBottom: 16 }}>{error}</div>}
+
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" className="primary-button" disabled={busy}>
+            {busy ? 'Joining...' : 'Join'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function Sidebar({ user, onDashboard, onStatistics, onSignOut, activePage }) {
   return (
     <aside className="sidebar">
@@ -277,7 +329,7 @@ function Sidebar({ user, onDashboard, onStatistics, onSignOut, activePage }) {
   );
 }
 
-function Dashboard({ athletes, onAdd, onSelect }) {
+function Dashboard({ athletes, onAdd, onSelect, onJoinCode }) {
   const stats = useMemo(() => {
     const high = athletes.filter((item) => item.latest_analysis?.risk === 'High').length;
     const moderate = athletes.filter((item) => item.latest_analysis?.risk === 'Moderate').length;
@@ -293,7 +345,7 @@ function Dashboard({ athletes, onAdd, onSelect }) {
           <p>{athletes.length} athletes assigned</p>
         </div>
         <div className="topbar-actions">
-          <button className="secondary-button">Join via Code</button>
+          <button className="secondary-button" onClick={onJoinCode}>Join via Code</button>
           <button className="primary-button" onClick={onAdd}>+ Add Athlete</button>
         </div>
       </header>
@@ -638,6 +690,44 @@ function StatisticsPage({ token, athletes }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  async function downloadSingleCsv(csvUrl, athleteName) {
+    try {
+      const res = await fetch(apiUrl(csvUrl));
+      if (!res.ok) throw new Error('CSV could not be downloaded');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${athleteName.replace(/\s+/g, '_')}_latest_less.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function downloadCombinedCsv() {
+    try {
+      const res = await fetch(`${API_BASE}/athletes/statistics/csv`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Combined CSV could not be downloaded');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `tum_sporcular_analiz_raporu.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   useEffect(() => {
     async function load() {
       try {
@@ -718,6 +808,12 @@ function StatisticsPage({ token, athletes }) {
         <div>
           <h1>İstatistikler</h1>
           <p>Tüm sporcular için toplam analiz verileri</p>
+        </div>
+        <div className="topbar-actions">
+          <button className="primary-button" onClick={downloadCombinedCsv}>
+            <span className="material-symbols-outlined" style={{ fontSize: 18, verticalAlign: 'middle', marginRight: 6 }}>download</span>
+            Ortak CSV İndir
+          </button>
         </div>
       </header>
 
@@ -885,6 +981,7 @@ function StatisticsPage({ token, athletes }) {
                   <th>Son Skor</th>
                   <th>Son Risk</th>
                   <th>Son Model</th>
+                  <th>Rapor</th>
                 </tr>
               </thead>
               <tbody>
@@ -902,6 +999,20 @@ function StatisticsPage({ token, athletes }) {
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--muted)' }}>
                       {a.latest_model ? (a.latest_model === 'yolo' ? 'YOLO' : a.latest_model === 'rtm' ? 'RTMPose' : 'MediaPipe') : '—'}
+                    </td>
+                    <td>
+                      {a.latest_csv_url ? (
+                        <button
+                          type="button"
+                          className="table-action-btn"
+                          onClick={() => downloadSingleCsv(a.latest_csv_url, a.name)}
+                          title="Son Analiz CSV Raporunu İndir"
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span>
+                        </button>
+                      ) : (
+                        <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1123,6 +1234,7 @@ function App() {
   const [athletes, setAthletes] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
   const [page, setPage] = useState('dashboard'); // 'dashboard' | 'statistics'
 
   async function request(path, options = {}) {
@@ -1180,19 +1292,28 @@ function App() {
     setSelected(athlete);
   }
 
+  async function joinAthlete(athleteId) {
+    const athlete = await request('/athletes/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ athlete_id: athleteId }),
+    });
+    setShowJoinModal(false);
+    await loadData();
+    setSelected(athlete);
+  }
+
   if (!token) return <AuthScreen onAuth={handleAuth} />;
 
   return (
     <div className="app-shell">
-      {!selected && (
-        <Sidebar
-          user={user}
-          onDashboard={() => { setSelected(null); setPage('dashboard'); }}
-          onStatistics={() => { setSelected(null); setPage('statistics'); }}
-          onSignOut={signOut}
-          activePage={page}
-        />
-      )}
+      <Sidebar
+        user={user}
+        onDashboard={() => { setSelected(null); setPage('dashboard'); }}
+        onStatistics={() => { setSelected(null); setPage('statistics'); }}
+        onSignOut={signOut}
+        activePage={selected ? 'dashboard' : page}
+      />
       {selected ? (
         <AthleteDetail
           athlete={selected}
@@ -1203,9 +1324,15 @@ function App() {
       ) : page === 'statistics' ? (
         <StatisticsPage token={token} athletes={athletes} />
       ) : (
-        <Dashboard athletes={athletes} onAdd={() => setShowModal(true)} onSelect={(a) => { setSelected(a); setPage('dashboard'); }} />
+        <Dashboard
+          athletes={athletes}
+          onAdd={() => setShowModal(true)}
+          onJoinCode={() => setShowJoinModal(true)}
+          onSelect={(a) => { setSelected(a); setPage('dashboard'); }}
+        />
       )}
       {showModal && <CreateAthleteModal onClose={() => setShowModal(false)} onCreate={createAthlete} />}
+      {showJoinModal && <JoinAthleteModal onClose={() => setShowJoinModal(false)} onJoin={joinAthlete} />}
     </div>
   );
 }

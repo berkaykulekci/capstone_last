@@ -32,9 +32,10 @@ button {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
   background: var(--bg);
   display: flex;
+  overflow: hidden;
 }
 
 .auth-shell {
@@ -192,11 +193,12 @@ input:focus {
 
 .sidebar {
   width: 241px;
-  min-height: 100vh;
+  height: 100%;
   background: var(--panel);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .sidebar-brand {
@@ -209,7 +211,7 @@ input:focus {
 }
 
 .nav-item {
-  margin: 16px 12px;
+  margin: 6px 12px;
   height: 42px;
   border: 0;
   border-radius: 7px;
@@ -217,6 +219,10 @@ input:focus {
   background: #132936;
   text-align: left;
   padding: 0 14px;
+}
+
+.nav-item:first-of-type {
+  margin-top: 16px;
 }
 
 .sidebar-user {
@@ -242,6 +248,8 @@ input:focus {
 .main-panel {
   flex: 1;
   padding: 35px 32px;
+  overflow-y: auto;
+  height: 100%;
 }
 
 .topbar,
@@ -406,7 +414,9 @@ input:focus {
 }
 
 .detail-layout {
-  width: 100%;
+  flex: 1;
+  overflow-y: auto;
+  height: 100%;
 }
 
 .back-button {
@@ -2024,4 +2034,27 @@ input:focus {
   .stats-charts-row {
     grid-template-columns: 1fr;
   }
+}
+
+.table-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--cyan);
+  cursor: pointer;
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+
+.table-action-btn:hover {
+  background: rgba(16, 183, 223, 0.12);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.table-action-btn:active {
+  transform: translateY(0);
 }

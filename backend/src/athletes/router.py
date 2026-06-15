@@ -1,5 +1,10 @@
+import io
+import os
 import shutil
 from pathlib import Path
+
+import pandas as pd
+from fastapi.responses import StreamingResponse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -17,8 +22,14 @@ from .analysis_service import (
 )
 
 VALID_POSE_MODELS = {"mediapipe", "yolo", "rtm"}
-from .model import Analysis, Athlete, new_public_id
-from .schema import AnalysisResponse, AnalysisSummary, AthleteCreate, AthleteResponse
+from .model import Analysis, Athlete, athlete_users, new_public_id
+from .schema import (
+    AnalysisResponse,
+    AnalysisSummary,
+    AthleteCreate,
+    AthleteResponse,
+    AthleteJoin,
+)
 
 router = APIRouter(prefix="/athletes", tags=["Athletes"])
 
@@ -53,10 +64,15 @@ def athlete_response(athlete: Athlete) -> AthleteResponse:
 
 
 def get_owned_athlete(athlete_id: str, user: User, db: Session) -> Athlete:
-    athlete = db.query(Athlete).filter(
-        Athlete.id == athlete_id,
-        Athlete.user_id == user.id,
-    ).first()
+    athlete = (
+        db.query(Athlete)
+        .outerjoin(athlete_users)
+        .filter(
+            Athlete.id == athlete_id,
+            (Athlete.user_id == user.id) | (athlete_users.c.user_id == user.id),
+        )
+        .first()
+    )
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
     return athlete
@@ -67,7 +83,17 @@ def list_athletes(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    athletes = db.query(Athlete).filter(Athlete.user_id == current_user.id).order_by(Athlete.created_at.desc()).all()
+    athletes = (
+        db.query(Athlete)
+        .outerjoin(athlete_users)
+        .filter(
+            (Athlete.user_id == current_user.id) |
+            (athlete_users.c.user_id == current_user.id)
+        )
+        .order_by(Athlete.created_at.desc())
+        .distinct()
+        .all()
+    )
     return [athlete_response(athlete) for athlete in athletes]
 
 
@@ -84,7 +110,39 @@ def create_athlete(
         sport=(payload.sport or "").strip() or None,
         team=(payload.team or "").strip() or None,
     )
+    athlete.doctors.append(current_user)
     db.add(athlete)
+    db.commit()
+    db.refresh(athlete)
+    return athlete_response(athlete)
+
+
+@router.post("/join", response_model=AthleteResponse)
+def join_athlete(
+    payload: AthleteJoin,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    athlete = db.query(Athlete).filter(Athlete.id == payload.athlete_id).first()
+    if not athlete:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="There is not an athlete with this code, perhaps you wrote it incorrectly"
+        )
+
+    # Check if already joined
+    is_linked = (athlete.user_id == current_user.id) or (db.query(athlete_users).filter(
+        athlete_users.c.athlete_id == payload.athlete_id,
+        athlete_users.c.user_id == current_user.id
+    ).first() is not None)
+
+    if is_linked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You already have this athlete"
+        )
+
+    athlete.doctors.append(current_user)
     db.commit()
     db.refresh(athlete)
     return athlete_response(athlete)
@@ -100,8 +158,13 @@ def get_statistics(
 
     athletes = (
         db.query(Athlete)
-        .filter(Athlete.user_id == current_user.id)
+        .outerjoin(athlete_users)
+        .filter(
+            (Athlete.user_id == current_user.id) |
+            (athlete_users.c.user_id == current_user.id)
+        )
         .order_by(Athlete.created_at.asc())
+        .distinct()
         .all()
     )
 
@@ -160,6 +223,7 @@ def get_statistics(
             "latest_score": latest.total_score if latest else None,
             "latest_risk": latest.risk if latest else None,
             "latest_model": latest.pose_model if latest else None,
+            "latest_csv_url": media_url(latest.csv_path) if latest else None,
         })
 
     score_distribution = {"0-4": 0, "5-9": 0, "10-14": 0, "15-19": 0}
@@ -197,6 +261,111 @@ def get_statistics(
         "score_timeline": sorted(score_timeline, key=lambda x: x["date"]),
         "athlete_summaries": athlete_summaries,
     }
+
+
+@router.get("/statistics/csv")
+def download_combined_csv(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate and download a combined CSV of the latest analysis for all athletes."""
+    athletes = (
+        db.query(Athlete)
+        .outerjoin(athlete_users)
+        .filter(
+            (Athlete.user_id == current_user.id) |
+            (athlete_users.c.user_id == current_user.id)
+        )
+        .order_by(Athlete.created_at.asc())
+        .distinct()
+        .all()
+    )
+
+    combined_rows = []
+    for athlete in athletes:
+        analyses = sorted(athlete.analyses, key=lambda a: a.created_at, reverse=True)
+        if not analyses:
+            continue
+        latest = analyses[0]
+        if not latest.csv_path or not os.path.exists(latest.csv_path):
+            continue
+
+        try:
+            df = pd.read_csv(latest.csv_path)
+            
+            # Standardize columns and add athlete details
+            df['sporcu_id'] = athlete.id
+            df['sporcu_adi'] = athlete.name
+            df['takim'] = athlete.team or ''
+            df['spor'] = athlete.sport or ''
+            df['analiz_id'] = latest.id
+            df['analiz_tarihi'] = latest.created_at.strftime("%Y-%m-%d %H:%M:%S")
+
+            if 'model' not in df.columns:
+                df['model'] = latest.pose_model or 'mediapipe'
+            if 'test_tarafi' not in df.columns:
+                df['test_tarafi'] = 'right' if (latest.pose_model in ('yolo', 'rtm')) else 'N/A'
+            if 'yaklaşık' not in df.columns:
+                df['yaklaşık'] = False
+
+            ordered_cols = [
+                'sporcu_id', 'sporcu_adi', 'takim', 'spor', 'analiz_id', 'analiz_tarihi',
+                'model', 'test_tarafi', 'madde_no', 'madde_adi', 'kamera', 'yaklaşık',
+                'atlayis_1_deger', 'atlayis_1_puan',
+                'atlayis_2_deger', 'atlayis_2_puan',
+                'atlayis_3_deger', 'atlayis_3_puan',
+                'karar_puani'
+            ]
+            df = df.reindex(columns=ordered_cols)
+            combined_rows.append(df)
+        except Exception as e:
+            pass
+
+    if combined_rows:
+        combined_df = pd.concat(combined_rows, ignore_index=True)
+    else:
+        combined_df = pd.DataFrame(columns=[
+            'sporcu_id', 'sporcu_adi', 'takim', 'spor', 'analiz_id', 'analiz_tarihi',
+            'model', 'test_tarafi', 'madde_no', 'madde_adi', 'kamera', 'yaklaşık',
+            'atlayis_1_deger', 'atlayis_1_puan',
+            'atlayis_2_deger', 'atlayis_2_puan',
+            'atlayis_3_deger', 'atlayis_3_puan',
+            'karar_puani'
+        ])
+
+    column_mapping = {
+        'sporcu_id': 'Sporcu ID',
+        'sporcu_adi': 'Sporcu Adı',
+        'takim': 'Takım',
+        'spor': 'Spor',
+        'analiz_id': 'Analiz ID',
+        'analiz_tarihi': 'Analiz Tarihi',
+        'model': 'Model',
+        'test_tarafi': 'Test Tarafı',
+        'madde_no': 'Madde No',
+        'madde_adi': 'Madde Adı',
+        'kamera': 'Kamera',
+        'yaklaşık': 'Yaklaşık',
+        'atlayis_1_deger': 'Atlayış 1 Değer',
+        'atlayis_1_puan': 'Atlayış 1 Puan',
+        'atlayis_2_deger': 'Atlayış 2 Değer',
+        'atlayis_2_puan': 'Atlayış 2 Puan',
+        'atlayis_3_deger': 'Atlayış 3 Değer',
+        'atlayis_3_puan': 'Atlayış 3 Puan',
+        'karar_puani': 'Karar Puanı'
+    }
+    
+    combined_df = combined_df.rename(columns=column_mapping)
+
+    stream = io.StringIO()
+    combined_df.to_csv(stream, index=False, encoding='utf-8-sig')
+    response_content = stream.getvalue()
+    
+    return StreamingResponse(
+        io.BytesIO(response_content.encode('utf-8-sig')),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=tum_sporcular_analiz_raporu.csv"}
+    )
 
 
 @router.get("/{athlete_id}", response_model=AthleteResponse)
