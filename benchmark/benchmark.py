@@ -301,23 +301,33 @@ def _run_rtm_inference(
         t1 = time.perf_counter()
         frame_times_ms.append((t1 - t0) * 1000.0)
 
-        # keypoints: (17, 2) — x,y normalize [0,1]; scores: (17,)
-        # Slice to 17 COCO joints (RTM outputs 133 kpts, we use the COCO subset)
+        # rtmlib Wholebody returns:
+        #   keypoints: (n_persons, 133, 2) — pixel coords (x, y)
+        #   scores:    (n_persons, 133)    — confidence per keypoint
+        # We select the best person then take the first 17 COCO body joints.
         lm_array = np.full((17, 3), np.nan)
         conf_row = np.full(17, np.nan)
 
-        if keypoints is not None and len(keypoints) >= 17:
-            for i in range(17):
-                x_norm = float(keypoints[i, 0])
-                y_norm = float(keypoints[i, 1])
-                conf = float(scores[i]) if i < len(scores) else 0.0
+        if keypoints is not None and len(keypoints) > 0:
+            # Select person with highest mean keypoint score
+            if len(keypoints) == 1:
+                kp, sc = keypoints[0], scores[0]   # (133, 2), (133,)
+            else:
+                mean_scores = np.nanmean(scores, axis=1)
+                best = int(np.argmax(mean_scores))
+                kp, sc = keypoints[best], scores[best]
 
-                if not np.isnan(x_norm) and not np.isnan(y_norm) and conf > 0:
-                    lm_array[i] = [
-                        np.clip(x_norm, 0.0, 1.0),
-                        np.clip(1.0 - y_norm, 0.0, 1.0),  # Y invert
-                        conf,
-                    ]
+            # Use first 17 COCO body joints
+            n_kp = min(17, kp.shape[0])
+            for i in range(n_kp):
+                x_px = float(kp[i, 0])
+                y_px = float(kp[i, 1])
+                conf = float(sc[i])
+
+                if not np.isnan(x_px) and not np.isnan(y_px) and conf > 0:
+                    x_norm = np.clip(x_px / width,  0.0, 1.0)
+                    y_norm = np.clip(1.0 - y_px / height, 0.0, 1.0)  # Y invert
+                    lm_array[i] = [x_norm, y_norm, conf]
                     conf_row[i] = conf
 
         all_poses_raw.append(lm_array)
